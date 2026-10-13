@@ -136,6 +136,7 @@ export interface ReconciliationGroup {
 export interface Finding {
   id: string;
   user_id: string;
+  rule_id?: string | null;
   reconciliation_group_id: string | null;
   finding_type: FindingType;
   severity: FindingSeverity;

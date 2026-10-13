@@ -106,45 +106,40 @@ export default function DocumentUploadPage() {
     setIsProcessing(true);
 
     for (const item of items) {
-      // Step 1: Uploading
-      setUploadQueue((prev) =>
-        prev.map((i) => (i.id === item.id ? { ...i, status: 'uploading', progress: 40 } : i))
-      );
-      await new Promise((r) => setTimeout(r, 600));
+      try {
+        // Stage 1: Uploading & validating
+        setUploadQueue((prev) =>
+          prev.map((i) => (i.id === item.id ? { ...i, status: 'uploading', progress: 25, error: undefined } : i))
+        );
 
-      // Step 2: AI Processing & Classification
-      setUploadQueue((prev) =>
-        prev.map((i) => (i.id === item.id ? { ...i, status: 'processing', progress: 80 } : i))
-      );
-      await new Promise((r) => setTimeout(r, 800));
+        // Stage 2: Server text extraction, OCR & AI analysis
+        setUploadQueue((prev) =>
+          prev.map((i) => (i.id === item.id ? { ...i, status: 'processing', progress: 60 } : i))
+        );
 
-      // Step 3: Complete & Save to DataStore
-      const newDoc: Document = {
-        id: `doc-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
-        user_id: 'usr-demo-admin-001',
-        file_name: item.name,
-        file_path: `/uploads/${item.name}`,
-        file_size: item.size,
-        mime_type: item.file.type || 'application/pdf',
-        category: item.category,
-        classified_as: item.category,
-        status: 'completed',
-        page_count: Math.floor(Math.random() * 4) + 1,
-        processing_started_at: new Date().toISOString(),
-        processing_completed_at: new Date().toISOString(),
-        processing_error: null,
-        processing_attempts: 1,
-        file_hash: `hash-${item.name}`,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      };
+        const { document } = await DataStore.uploadDocument(item.file, item.category);
 
-      DataStore.addDocument(newDoc);
-
-      setUploadQueue((prev) =>
-        prev.map((i) => (i.id === item.id ? { ...i, status: 'completed', progress: 100 } : i))
-      );
-      setCompletedCount((c) => c + 1);
+        // Stage 3: Completed with real persistent document
+        if (document) {
+          setUploadQueue((prev) =>
+            prev.map((i) =>
+              i.id === item.id
+                ? { ...i, status: 'completed', progress: 100, error: undefined }
+                : i
+            )
+          );
+          setCompletedCount((c) => c + 1);
+        }
+      } catch (err: unknown) {
+        const errorMsg = (err as Error).message || 'Processing failed';
+        setUploadQueue((prev) =>
+          prev.map((i) =>
+            i.id === item.id
+              ? { ...i, status: 'error', progress: 0, error: errorMsg }
+              : i
+          )
+        );
+      }
     }
 
     setIsProcessing(false);
@@ -207,7 +202,7 @@ export default function DocumentUploadPage() {
           ref={fileInputRef}
           type="file"
           multiple
-          accept=".pdf,.docx,.xlsx,.jpg,.png"
+          accept=".pdf,.png,.jpg,.jpeg,.tiff,.tif"
           onChange={handleFileSelect}
           style={{ display: 'none' }}
         />
@@ -232,7 +227,7 @@ export default function DocumentUploadPage() {
           Drag & drop files here or <span style={{ color: 'var(--ds-teal-500)', textDecoration: 'underline' }}>click to browse</span>
         </h3>
         <p style={{ fontSize: '0.82rem', color: 'var(--ds-text-muted)', marginBottom: 16 }}>
-          Supports PDF, JPG, PNG, XLSX, CSV (Max 50MB per file)
+          Supports PDF, JPG, PNG, TIFF (Max 50MB per file)
         </p>
 
         <div style={{ display: 'inline-flex', gap: 8 }}>
@@ -335,6 +330,12 @@ export default function DocumentUploadPage() {
                     <div style={{ fontSize: '0.72rem', color: 'var(--ds-text-muted)' }}>
                       {(item.size / (1024 * 1024)).toFixed(1)} MB • {item.category.replace('_', ' ')}
                     </div>
+                    {item.error && (
+                      <div style={{ fontSize: '0.72rem', color: 'var(--ds-error)', marginTop: 2, display: 'flex', alignItems: 'center', gap: 4 }}>
+                        <AlertCircle size={12} />
+                        <span>{item.error}</span>
+                      </div>
+                    )}
                   </div>
                 </div>
 

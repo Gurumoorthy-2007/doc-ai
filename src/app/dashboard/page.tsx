@@ -30,6 +30,7 @@ export default function DashboardPage() {
   const [findings, setFindings] = useState<Finding[]>([]);
   const [reconciliationGroups, setReconciliationGroups] = useState<ReconciliationGroup[]>([]);
   const [auditEvents, setAuditEvents] = useState<any[]>([]);
+  const [stats, setStats] = useState<any>(null);
   const [currentDate, setCurrentDate] = useState('Apr 26, 2025');
 
   useEffect(() => {
@@ -38,22 +39,34 @@ export default function DashboardPage() {
     setFindings(DataStore.getFindings());
     setReconciliationGroups(DataStore.getReconciliationGroups());
     setAuditEvents(DataStore.getAuditEvents().slice(0, 5));
+
+    DataStore.fetchDashboardStats()
+      .then((data) => {
+        if (data) {
+          setStats(data);
+          if (data.recentAuditEvents && data.recentAuditEvents.length > 0) {
+            setAuditEvents(data.recentAuditEvents.slice(0, 5));
+          }
+        }
+      })
+      .catch((err) => console.error('Failed to fetch dashboard stats:', err));
   }, []);
 
-  const totalDocs = documents.length;
-  const openFindings = findings.filter((f) => f.status === 'open').length;
-  const pendingReview = findings.filter((f) => !f.is_reviewed && f.status !== 'resolved').length;
-  const flaggedVariance = reconciliationGroups.reduce((acc, g) => acc + (g.variance || 0), 0);
+  const totalDocs = stats?.totalDocuments ?? documents.length;
+  const completedDocs = stats?.completedDocuments ?? documents.filter((d) => d.status === 'completed').length;
+  const openFindings = stats?.openFindings ?? findings.filter((f) => f.status === 'open').length;
+  const pendingReview = stats?.pendingReview ?? findings.filter((f) => !f.is_reviewed && f.status !== 'resolved').length;
+  const flaggedVariance = stats?.flaggedVariance ?? reconciliationGroups.reduce((acc, g) => acc + (g.variance || 0), 0);
 
-  // Processing trend data (Apr 20 - Apr 26)
-  const trendDays = [
-    { day: 'Apr 21', contracts: 18, pos: 25, invoices: 32, compliance: 8 },
-    { day: 'Apr 22', contracts: 22, pos: 28, invoices: 35, compliance: 10 },
-    { day: 'Apr 23', contracts: 20, pos: 30, invoices: 38, compliance: 12 },
-    { day: 'Apr 24', contracts: 26, pos: 34, invoices: 42, compliance: 14 },
-    { day: 'Apr 25', contracts: 24, pos: 32, invoices: 40, compliance: 11 },
-    { day: 'Apr 26', contracts: 30, pos: 38, invoices: 48, compliance: 16 },
-    { day: 'Apr 27', contracts: 28, pos: 36, invoices: 44, compliance: 15 },
+  // Processing trend data
+  const trendDays = stats?.trendDays && stats.trendDays.length > 0 ? stats.trendDays : [
+    { day: 'Mon', contracts: 1, pos: 2, invoices: 2, compliance: 1 },
+    { day: 'Tue', contracts: 2, pos: 3, invoices: 4, compliance: 1 },
+    { day: 'Wed', contracts: 2, pos: 4, invoices: 3, compliance: 2 },
+    { day: 'Thu', contracts: 3, pos: 5, invoices: 6, compliance: 2 },
+    { day: 'Fri', contracts: 4, pos: 6, invoices: 7, compliance: 3 },
+    { day: 'Sat', contracts: 2, pos: 3, invoices: 4, compliance: 1 },
+    { day: 'Sun', contracts: 3, pos: 4, invoices: 5, compliance: 2 },
   ];
 
   return (
@@ -117,13 +130,13 @@ export default function DashboardPage() {
             </div>
           </div>
           <div style={{ fontSize: '2rem', fontWeight: 700, color: 'var(--ds-text-primary)', lineHeight: 1.1 }}>
-            {totalDocs > 0 ? totalDocs * 3 : 24}
+            {totalDocs}
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginTop: 8, fontSize: '0.78rem' }}>
             <span style={{ color: 'var(--ds-success)', display: 'flex', alignItems: 'center', fontWeight: 600 }}>
-              <ArrowUpRight size={14} /> +12%
+              <ArrowUpRight size={14} /> {completedDocs} completed
             </span>
-            <span style={{ color: 'var(--ds-text-muted)' }}>from last week</span>
+            <span style={{ color: 'var(--ds-text-muted)' }}>saved records</span>
           </div>
         </div>
 
@@ -152,10 +165,10 @@ export default function DashboardPage() {
             {openFindings}
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginTop: 8, fontSize: '0.78rem' }}>
-            <span style={{ color: 'var(--ds-success)', display: 'flex', alignItems: 'center', fontWeight: 600 }}>
-              <ArrowDownRight size={14} /> -38%
+            <span style={{ color: openFindings > 0 ? 'var(--ds-warning)' : 'var(--ds-success)', display: 'flex', alignItems: 'center', fontWeight: 600 }}>
+              {openFindings > 0 ? `${openFindings} active` : '0 issues'}
             </span>
-            <span style={{ color: 'var(--ds-text-muted)' }}>from last week</span>
+            <span style={{ color: 'var(--ds-text-muted)' }}>discrepancies</span>
           </div>
         </div>
 
@@ -181,13 +194,13 @@ export default function DashboardPage() {
             </div>
           </div>
           <div style={{ fontSize: '1.8rem', fontWeight: 700, color: 'var(--ds-text-primary)', lineHeight: 1.1 }}>
-            ₹ {flaggedVariance > 0 ? flaggedVariance.toLocaleString('en-IN') : '1,45,000'}
+            ₹ {flaggedVariance.toLocaleString('en-IN')}
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginTop: 8, fontSize: '0.78rem' }}>
-            <span style={{ color: 'var(--ds-error)', display: 'flex', alignItems: 'center', fontWeight: 600 }}>
-              <ArrowUpRight size={14} /> +28%
+            <span style={{ color: flaggedVariance > 0 ? 'var(--ds-error)' : 'var(--ds-success)', display: 'flex', alignItems: 'center', fontWeight: 600 }}>
+              {flaggedVariance > 0 ? 'Reconciliation delta' : 'Fully matched'}
             </span>
-            <span style={{ color: 'var(--ds-text-muted)' }}>from last week</span>
+            <span style={{ color: 'var(--ds-text-muted)' }}>total variance</span>
           </div>
         </div>
 
@@ -271,7 +284,7 @@ export default function DashboardPage() {
               gap: 12,
             }}
           >
-            {trendDays.map((d, i) => (
+            {trendDays.map((d: any, i: number) => (
               <div
                 key={i}
                 style={{

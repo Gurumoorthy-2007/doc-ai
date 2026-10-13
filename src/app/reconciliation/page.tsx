@@ -31,11 +31,17 @@ export default function ReconciliationPage() {
   const [detailTab, setDetailTab] = useState<'field' | 'calculation'>('calculation');
 
   useEffect(() => {
-    const list = DataStore.getReconciliationGroups();
-    setGroups(list);
-    if (list.length > 0) {
-      setSelectedGroup(list[0]);
-    }
+    let isMounted = true;
+    DataStore.fetchReconciliations().then((list) => {
+      if (!isMounted) return;
+      setGroups(list);
+      if (list.length > 0) {
+        setSelectedGroup(list[0]);
+      }
+    });
+    return () => {
+      isMounted = false;
+    };
   }, []);
 
   const totalGroups = groups.length;
@@ -54,13 +60,20 @@ export default function ReconciliationPage() {
     return matchesVendor && matchesSearch;
   });
 
-  const handleRunReconciliation = () => {
+  const handleRunReconciliation = async () => {
     setIsReconciling(true);
-    setTimeout(() => {
-      // Re-fetch from store
-      setGroups(DataStore.getReconciliationGroups());
+    try {
+      const res = await DataStore.runReconciliationApi();
+      const updatedList = await DataStore.fetchReconciliations();
+      setGroups(updatedList);
+      if (res.group) {
+        setSelectedGroup(res.group);
+      }
+    } catch (err) {
+      console.error('Reconciliation error:', err);
+    } finally {
       setIsReconciling(false);
-    }, 1200);
+    }
   };
 
   const getStatusBadge = (status: string) => {

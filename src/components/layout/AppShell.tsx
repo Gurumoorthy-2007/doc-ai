@@ -29,8 +29,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const { profile, signOut } = useAuth();
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const [openFindingsCount, setOpenFindingsCount] = useState(5);
-  const [pendingReviewCount, setPendingReviewCount] = useState(3);
+  const [openFindingsCount, setOpenFindingsCount] = useState(0);
+  const [pendingReviewCount, setPendingReviewCount] = useState(0);
   const [searchQuery, setSearchQuery] = useState('');
   const [currentDate, setCurrentDate] = useState('Apr 26, 2025');
 
@@ -42,6 +42,15 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     const reviewCount = findings.filter((f) => !f.is_reviewed && f.status !== 'resolved').length;
     setOpenFindingsCount(openCount);
     setPendingReviewCount(reviewCount);
+
+    DataStore.fetchFindings()
+      .then((serverFindings) => {
+        if (serverFindings) {
+          setOpenFindingsCount(serverFindings.filter((f) => f.status === 'open').length);
+          setPendingReviewCount(serverFindings.filter((f) => !f.is_reviewed && f.status !== 'resolved').length);
+        }
+      })
+      .catch(() => {});
   }, [pathname]);
 
   const initials = profile?.full_name

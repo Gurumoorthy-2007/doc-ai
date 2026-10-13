@@ -32,6 +32,15 @@ export default function AuditTrailPage() {
   useEffect(() => {
     setCaseHistory(DataStore.getCaseHistory());
     setAuditEvents(DataStore.getAuditEvents());
+
+    DataStore.fetchAuditTrail()
+      .then((data) => {
+        if (data) {
+          if (data.caseHistory) setCaseHistory(data.caseHistory);
+          if (data.auditEvents) setAuditEvents(data.auditEvents);
+        }
+      })
+      .catch((err) => console.error('Failed to fetch audit trail:', err));
   }, []);
 
   const filteredCases = caseHistory.filter(

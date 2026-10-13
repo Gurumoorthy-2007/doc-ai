@@ -34,33 +34,48 @@ export default function ReviewQueuePage() {
     const list = DataStore.getFindings();
     setFindings(list);
     if (list.length > 0) {
-      // Pick first unreviewed or first finding
       const pending = list.find((f) => !f.is_reviewed && f.status !== 'resolved');
       setSelectedFindingId(pending ? pending.id : list[0].id);
     }
+
+    DataStore.fetchFindings()
+      .then((serverList) => {
+        if (serverList && serverList.length > 0) {
+          setFindings(serverList);
+          setSelectedFindingId((prev) => {
+            if (prev && serverList.some((f) => f.id === prev)) return prev;
+            const pending = serverList.find((f) => !f.is_reviewed && f.status !== 'resolved');
+            return pending ? pending.id : serverList[0].id;
+          });
+        }
+      })
+      .catch((err) => console.error('Failed to fetch findings:', err));
   }, []);
 
   const activeFinding = findings.find((f) => f.id === selectedFindingId) ?? findings[0] ?? null;
 
-  const handleSaveReview = () => {
+  const handleSaveReview = async () => {
     if (!activeFinding) return;
     setIsSaving(true);
 
-    setTimeout(() => {
-      DataStore.updateFindingReview(
+    try {
+      const updated = await DataStore.saveFindingReviewApi(
         activeFinding.id,
         decision,
         comments,
         'Gurumoorthy S'
       );
-      const updatedList = DataStore.getFindings();
-      setFindings(updatedList);
-      setIsSaving(false);
-      setSuccessMessage('Review decision saved successfully.');
+      if (updated) {
+        setFindings((prev) => prev.map((f) => (f.id === updated.id ? updated : f)));
+      }
+      setSuccessMessage('Review decision saved and recorded to audit trail.');
       setComments('');
-
-      setTimeout(() => setSuccessMessage(''), 3000);
-    }, 600);
+      setTimeout(() => setSuccessMessage(''), 4000);
+    } catch (err) {
+      console.error('Failed to save review:', err);
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   const pendingQueue = findings.filter((f) => !f.is_reviewed && f.status !== 'resolved');

@@ -36,69 +36,54 @@ function DocumentDetailsContent({ params }: { params: Promise<{ id: string }> })
   const [activeTab, setActiveTab] = useState<'fields' | 'lineItems' | 'preview' | 'findings'>('fields');
   const [isExtracting, setIsExtracting] = useState(false);
 
+  const [docText, setDocText] = useState<string>('');
+
   useEffect(() => {
-    const d = DataStore.getDocumentById(resolvedParams.id);
-    setDoc(d);
-    if (d) {
-      setFields(DataStore.getExtractedFields(d.id));
-      setLineItems(DataStore.getLineItems(d.id));
-      setFindings(DataStore.getFindings().filter((f) => f.source_document_id === d.id || f.compared_document_id === d.id));
-    }
+    let isMounted = true;
+    const loadData = async () => {
+      const details = await DataStore.fetchDocumentDetails(resolvedParams.id);
+      if (!isMounted) return;
+      setDoc(details.document);
+      setFields(details.fields);
+      setLineItems(details.lineItems);
+      setFindings(details.findings);
+
+      // Fetch actual document text for preview
+      try {
+        const textRes = await fetch(`/api/documents/${resolvedParams.id}/file?text=true`);
+        if (textRes.ok) {
+          const json = await textRes.json();
+          if (json.success && json.data?.text && isMounted) {
+            setDocText(json.data.text);
+          }
+        }
+      } catch {
+        // ignore
+      }
+    };
+    loadData();
+    return () => {
+      isMounted = false;
+    };
   }, [resolvedParams.id]);
 
-  const handleRunExtraction = () => {
+  const handleRunExtraction = async () => {
     if (!doc) return;
     setIsExtracting(true);
-
-    setTimeout(() => {
-      // Add or refresh fields
-      if (fields.length === 0) {
-        const dummyFields: ExtractedField[] = [
-          {
-            id: `fld-${Date.now()}-1`,
-            document_id: doc.id,
-            field_name: 'document_number',
-            field_value: `DOC-${Math.floor(Math.random() * 9000) + 1000}`,
-            field_type: 'string',
-            confidence: 0.98,
-            is_missing: false,
-            is_ambiguous: false,
-            source_text: 'Document Reference No: ' + doc.file_name,
-            source_page: 1,
-            created_at: new Date().toISOString(),
-          },
-          {
-            id: `fld-${Date.now()}-2`,
-            document_id: doc.id,
-            field_name: 'total_amount',
-            field_value: '75000.00',
-            field_type: 'number',
-            confidence: 0.96,
-            is_missing: false,
-            is_ambiguous: false,
-            source_text: 'Gross Amount: ₹ 75,000.00',
-            source_page: 1,
-            created_at: new Date().toISOString(),
-          },
-          {
-            id: `fld-${Date.now()}-3`,
-            document_id: doc.id,
-            field_name: 'supplier_name',
-            field_value: 'Enterprise Logistics & Supplies',
-            field_type: 'string',
-            confidence: 0.97,
-            is_missing: false,
-            is_ambiguous: false,
-            source_text: 'Vendor Name: Enterprise Logistics & Supplies',
-            source_page: 1,
-            created_at: new Date().toISOString(),
-          },
-        ];
-        DataStore.addExtractedFields(dummyFields);
-        setFields(dummyFields);
+    try {
+      const updated = await DataStore.reprocessDocumentApi(doc.id);
+      if (updated) {
+        setDoc(updated);
+        const details = await DataStore.fetchDocumentDetails(doc.id);
+        setFields(details.fields);
+        setLineItems(details.lineItems);
+        setFindings(details.findings);
       }
+    } catch (err) {
+      console.error('Extraction error:', err);
+    } finally {
       setIsExtracting(false);
-    }, 1200);
+    }
   };
 
   if (!doc) {
@@ -411,13 +396,24 @@ function DocumentDetailsContent({ params }: { params: Promise<{ id: string }> })
       {/* Tab 3: Document Evidence Preview */}
       {activeTab === 'preview' && (
         <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 0.8fr', gap: 20 }}>
-          {/* Simulated Document Viewer */}
+          {/* Document Viewer */}
           <div className="card" style={{ padding: 24 }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16, borderBottom: '1px solid var(--ds-border-light)', paddingBottom: 12 }}>
               <div style={{ fontSize: '0.85rem', fontWeight: 600 }}>
-                {doc.file_name} • Page 2 of {doc.page_count || 2}
+                {doc.file_name} • {doc.page_count ? `${doc.page_count} Page${doc.page_count > 1 ? 's' : ''}` : 'Single page'}
               </div>
-              <span className="badge badge-info">100% Zoom</span>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <a
+                  href={`/api/documents/${doc.id}/file`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="btn btn-secondary"
+                  style={{ padding: '4px 10px', fontSize: '0.78rem' }}
+                >
+                  <ExternalLink size={12} />
+                  <span>Open Original File</span>
+                </a>
+              </div>
             </div>
 
             <div
@@ -430,71 +426,37 @@ function DocumentDetailsContent({ params }: { params: Promise<{ id: string }> })
                 fontFamily: 'monospace',
                 fontSize: '0.82rem',
                 lineHeight: 1.8,
+                maxHeight: 520,
+                overflowY: 'auto',
+                whiteSpace: 'pre-wrap',
+                color: '#1e293b',
               }}
             >
-              <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '2px solid #000', paddingBottom: 12, marginBottom: 16 }}>
+              {docText ? (
                 <div>
-                  <h3 style={{ margin: 0, fontSize: '1.1rem', fontFamily: 'sans-serif' }}>METRO SUPPLIES PVT LTD</h3>
-                  <div>104 Industrial Estate, Sector 4</div>
-                  <div>GSTIN: 27AABCS1429B1Z8</div>
-                </div>
-                <div style={{ textAlign: 'right' }}>
-                  <div style={{ fontWeight: 700, fontSize: '1.1rem', color: 'var(--ds-teal-500)' }}>TAX INVOICE</div>
-                  <div>Invoice No: <strong>INV-5112</strong></div>
-                  <div>Date: Apr 18, 2025</div>
-                </div>
-              </div>
-
-              <div style={{ marginBottom: 16 }}>
-                <div>Bill To: ABC Tech India Operations</div>
-                <div>PO Reference: <strong>PO-13001</strong></div>
-                <div>
-                  Cost Center:{' '}
-                  <span style={{ background: '#fef3c7', padding: '1px 6px', border: '1px dashed #f59e0b', borderRadius: 3 }}>
-                    CC-204 (Mismatch vs PO: CC-203)
-                  </span>
-                </div>
-              </div>
-
-              <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: 16 }}>
-                <thead>
-                  <tr style={{ borderBottom: '1px solid #ccc' }}>
-                    <th style={{ textAlign: 'left', padding: 6 }}>Description</th>
-                    <th style={{ textAlign: 'right', padding: 6 }}>Qty</th>
-                    <th style={{ textAlign: 'right', padding: 6 }}>Rate</th>
-                    <th style={{ textAlign: 'right', padding: 6 }}>Total</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr>
-                    <td style={{ padding: 6 }}>Executive High-Back Chairs</td>
-                    <td style={{ textAlign: 'right', padding: 6 }}>10</td>
-                    <td style={{ textAlign: 'right', padding: 6 }}>6,500.00</td>
-                    <td style={{ textAlign: 'right', padding: 6 }}>65,000.00</td>
-                  </tr>
-                  <tr>
-                    <td style={{ padding: 6 }}>Freight & GST Surcharge</td>
-                    <td style={{ textAlign: 'right', padding: 6 }}>1</td>
-                    <td style={{ textAlign: 'right', padding: 6 }}>3,750.00</td>
-                    <td style={{ textAlign: 'right', padding: 6 }}>3,750.00</td>
-                  </tr>
-                </tbody>
-              </table>
-
-              <div
-                style={{
-                  display: 'flex',
-                  justifyContent: 'flex-end',
-                  borderTop: '2px solid #000',
-                  paddingTop: 8,
-                }}
-              >
-                <div style={{ textAlign: 'right' }}>
-                  <div style={{ fontSize: '1rem', fontWeight: 700, background: '#fee2e2', padding: '4px 10px', borderRadius: 4, border: '1px solid #ef4444' }}>
-                    Total Amount: ₹ 68,750.00
+                  <div style={{ borderBottom: '2px solid var(--ds-border)', paddingBottom: 8, marginBottom: 16, fontWeight: 700, fontFamily: 'sans-serif', color: 'var(--ds-teal-500)' }}>
+                    EXTRACTED DOCUMENT TEXT CONTENT
                   </div>
+                  {docText}
                 </div>
-              </div>
+              ) : (
+                <div style={{ textAlign: 'center', padding: '40px 10px', color: 'var(--ds-text-secondary)' }}>
+                  <FileText size={36} style={{ color: 'var(--ds-text-muted)', margin: '0 auto 12px' }} />
+                  <div style={{ fontWeight: 600, marginBottom: 4 }}>Original File Stored</div>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--ds-text-muted)', maxWidth: 400, margin: '0 auto 16px' }}>
+                    Document content is saved securely. Text extraction is available for text-based PDFs and OCR-processed images.
+                  </div>
+                  <a
+                    href={`/api/documents/${doc.id}/file`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="btn btn-primary"
+                    style={{ padding: '6px 14px', fontSize: '0.82rem' }}
+                  >
+                    View File ({doc.mime_type})
+                  </a>
+                </div>
+              )}
             </div>
           </div>
 

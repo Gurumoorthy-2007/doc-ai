@@ -2,57 +2,104 @@
 
 import { Suspense, useState, useEffect, use } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
 import AppShell from '@/components/layout/AppShell';
 import { DataStore } from '@/lib/data/store';
-import type { Finding } from '@/lib/types';
+import type { Finding, Document, ExtractedField } from '@/lib/types';
 import {
   ArrowLeft,
   AlertTriangle,
   GitCompareArrows,
-  ExternalLink,
   CheckCircle,
   XCircle,
   HelpCircle,
   FileText,
   ZoomIn,
   ZoomOut,
-  Maximize2,
-  Calendar,
-  MessageSquare,
+  Download,
   Shield,
   Layers,
+  FileSearch,
 } from 'lucide-react';
 import { format } from 'date-fns';
 
 function EvidenceViewerContent({ params }: { params: Promise<{ id: string }> }) {
   const resolvedParams = use(params);
-  const router = useRouter();
 
   const [finding, setFinding] = useState<Finding | null>(null);
+  const [sourceDoc, setSourceDoc] = useState<Document | null>(null);
+  const [comparedDoc, setComparedDoc] = useState<Document | null>(null);
+  const [sourceFields, setSourceFields] = useState<ExtractedField[]>([]);
+  const [docText, setDocText] = useState<string>('');
+  const [isLoadingText, setIsLoadingText] = useState<boolean>(false);
+  const [isLoadingEvidence, setIsLoadingEvidence] = useState<boolean>(true);
+
   const [activeTab, setActiveTab] = useState<'evidence' | 'details'>('evidence');
   const [zoomLevel, setZoomLevel] = useState(100);
-  const [currentPage, setCurrentPage] = useState(2);
-  const [totalPages, setTotalPages] = useState(5);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
   const [showReviewModal, setShowReviewModal] = useState(false);
   const [reviewDecision, setReviewDecision] = useState<'accepted' | 'rejected' | 'reviewing'>('accepted');
   const [reviewComment, setReviewComment] = useState('');
   const [isSavingReview, setIsSavingReview] = useState(false);
 
   useEffect(() => {
-    const f = DataStore.getFindingById(resolvedParams.id);
-    setFinding(f);
-    if (f?.source_page) {
-      setCurrentPage(f.source_page);
-    }
+    let isMounted = true;
+    setIsLoadingEvidence(true);
+
+    DataStore.getFindingEvidence(resolvedParams.id)
+      .then((data: any) => {
+        if (!isMounted) return;
+        if (data.finding) {
+          setFinding(data.finding);
+          setSourceDoc(data.sourceDocument);
+          setComparedDoc(data.comparedDocument);
+          setSourceFields(data.sourceFields);
+          if (data.finding.source_page) {
+            setCurrentPage(data.finding.source_page);
+          }
+          if (data.sourceDocument?.page_count) {
+            setTotalPages(data.sourceDocument.page_count);
+          }
+
+          // Fetch real document text for evidence highlighting
+          if (data.sourceDocument?.id) {
+            setIsLoadingText(true);
+            fetch(`/api/documents/${data.sourceDocument.id}/file?text=true`)
+              .then((res) => (res.ok ? res.json() : null))
+              .then((textData) => {
+                if (!isMounted) return;
+                if (textData?.data?.text) {
+                  setDocText(textData.data.text);
+                  if (textData.data.pageCount) {
+                    setTotalPages(textData.data.pageCount);
+                  }
+                }
+              })
+              .catch(() => {})
+              .finally(() => {
+                if (isMounted) setIsLoadingText(false);
+              });
+          }
+        }
+      })
+      .catch((err: any) => {
+        console.error('Failed to load finding evidence:', err);
+      })
+      .finally(() => {
+        if (isMounted) setIsLoadingEvidence(false);
+      });
+
+    return () => {
+      isMounted = false;
+    };
   }, [resolvedParams.id]);
 
-  const handleSaveReview = () => {
+  const handleSaveReview = async () => {
     if (!finding) return;
     setIsSavingReview(true);
 
-    setTimeout(() => {
-      const updated = DataStore.updateFindingReview(
+    try {
+      const updated = await DataStore.saveFindingReviewApi(
         finding.id,
         reviewDecision,
         reviewComment,
@@ -61,10 +108,156 @@ function EvidenceViewerContent({ params }: { params: Promise<{ id: string }> }) 
       if (updated) {
         setFinding(updated);
       }
-      setIsSavingReview(false);
       setShowReviewModal(false);
-    }, 600);
+    } catch (err) {
+      console.error('Failed to save review:', err);
+    } finally {
+      setIsSavingReview(false);
+    }
   };
+
+  // Helper to highlight exact source passage in real document text
+  const renderHighlightedDocumentText = () => {
+    if (isLoadingText) {
+      return (
+        <div style={{ padding: '40px 20px', textAlign: 'center', color: 'var(--ds-text-secondary)' }}>
+          <FileSearch size={24} style={{ margin: '0 auto 8px', animation: 'spin 2s linear infinite' }} />
+          <div>Retrieving stored document plain text stream...</div>
+        </div>
+      );
+    }
+
+    if (!docText) {
+      return (
+        <div style={{ padding: '30px 20px', textAlign: 'center', color: 'var(--ds-text-secondary)' }}>
+          <AlertTriangle size={24} style={{ margin: '0 auto 8px', color: 'var(--ds-warning)' }} />
+          <div style={{ fontWeight: 600, marginBottom: 4 }}>Extracted Plain Text Not Available</div>
+          <p style={{ fontSize: '0.82rem', maxWidth: 460, margin: '0 auto' }}>
+            {sourceDoc
+              ? `Document ${sourceDoc.file_name} does not have cached plain-text extracted or is a binary format. You can download and inspect the original file directly.`
+              : 'The source document for this finding is unlinked or was generated in an earlier session.'}
+          </p>
+          {sourceDoc && (
+            <a
+              href={`/api/documents/${sourceDoc.id}/file`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="btn btn-secondary"
+              style={{ marginTop: 14 }}
+            >
+              <Download size={14} />
+              <span>Download Original {sourceDoc.file_name}</span>
+            </a>
+          )}
+        </div>
+      );
+    }
+
+    const passage = finding?.source_text?.trim();
+
+    if (!passage) {
+      return (
+        <pre
+          style={{
+            whiteSpace: 'pre-wrap',
+            wordBreak: 'break-word',
+            fontFamily: 'monospace',
+            fontSize: '0.82rem',
+            lineHeight: 1.6,
+            margin: 0,
+            color: 'var(--ds-text-primary)',
+          }}
+        >
+          {docText}
+        </pre>
+      );
+    }
+
+    // Try finding exact or normalized match
+    const lowerText = docText.toLowerCase();
+    const lowerPassage = passage.toLowerCase();
+    const matchIndex = lowerText.indexOf(lowerPassage);
+
+    if (matchIndex === -1) {
+      return (
+        <div>
+          <div
+            style={{
+              padding: '8px 12px',
+              borderRadius: 'var(--ds-radius)',
+              background: 'var(--ds-warning-bg)',
+              border: '1px solid rgba(245, 158, 11, 0.3)',
+              marginBottom: 16,
+              fontSize: '0.8rem',
+              color: 'var(--ds-warning)',
+            }}
+          >
+            <strong>Note:</strong> Exact passage &ldquo;{passage}&rdquo; was extracted by the parser but could not be strictly aligned character-for-character in the raw text stream. Raw document content shown below.
+          </div>
+          <pre
+            style={{
+              whiteSpace: 'pre-wrap',
+              wordBreak: 'break-word',
+              fontFamily: 'monospace',
+              fontSize: '0.82rem',
+              lineHeight: 1.6,
+              margin: 0,
+              color: 'var(--ds-text-primary)',
+            }}
+          >
+            {docText}
+          </pre>
+        </div>
+      );
+    }
+
+    const before = docText.slice(0, matchIndex);
+    const matched = docText.slice(matchIndex, matchIndex + passage.length);
+    const after = docText.slice(matchIndex + passage.length);
+
+    return (
+      <pre
+        style={{
+          whiteSpace: 'pre-wrap',
+          wordBreak: 'break-word',
+          fontFamily: 'monospace',
+          fontSize: '0.82rem',
+          lineHeight: 1.6,
+          margin: 0,
+          color: 'var(--ds-text-primary)',
+        }}
+      >
+        {before}
+        <mark
+          style={{
+            background: '#fee2e2',
+            color: '#991b1b',
+            border: '2px solid #ef4444',
+            borderRadius: 4,
+            padding: '2px 6px',
+            fontWeight: 700,
+            boxShadow: '0 0 8px rgba(239, 68, 68, 0.4)',
+            display: 'inline-block',
+          }}
+          title={`Flagged Field: ${finding?.source_field || 'Value'}`}
+        >
+          {matched}
+        </mark>
+        {after}
+      </pre>
+    );
+  };
+
+  if (isLoadingEvidence) {
+    return (
+      <AppShell>
+        <div style={{ textAlign: 'center', padding: '80px 20px', color: 'var(--ds-text-secondary)' }}>
+          <FileSearch size={36} style={{ margin: '0 auto 12px' }} />
+          <h2 style={{ fontSize: '1.1rem', fontWeight: 600 }}>Loading Finding & Evidence...</h2>
+        </div>
+      </AppShell>
+    );
+  }
 
   if (!finding) {
     return (
@@ -106,11 +299,11 @@ function EvidenceViewerContent({ params }: { params: Promise<{ id: string }> }) 
         </Link>
       </div>
 
-      {/* Main Finding Banner (Matches Image 1 bottom right and Image 2 Screen 9) */}
+      {/* Main Finding Banner */}
       <div className="card" style={{ padding: '24px 28px', marginBottom: 20 }}>
         <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 20, flexWrap: 'wrap' }}>
           <div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8, flexWrap: 'wrap' }}>
               <span
                 style={{
                   display: 'inline-flex',
@@ -120,15 +313,19 @@ function EvidenceViewerContent({ params }: { params: Promise<{ id: string }> }) 
                   borderRadius: 20,
                   fontSize: '0.75rem',
                   fontWeight: 600,
-                  background: finding.severity === 'high' ? 'var(--ds-error-bg)' : 'var(--ds-warning-bg)',
-                  color: finding.severity === 'high' ? 'var(--ds-error)' : 'var(--ds-warning)',
+                  background: finding.severity === 'high' || finding.severity === 'critical' ? 'var(--ds-error-bg)' : 'var(--ds-warning-bg)',
+                  color: finding.severity === 'high' || finding.severity === 'critical' ? 'var(--ds-error)' : 'var(--ds-warning)',
                 }}
               >
                 <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'currentColor' }} />
                 {finding.severity.toUpperCase()} SEVERITY
               </span>
               <span className="badge">Finding ID: {finding.id}</span>
+              <span className="badge">Rule: {finding.rule_id}</span>
               <span className="badge badge-info">Status: {finding.status.toUpperCase()}</span>
+              {finding.is_reviewed && (
+                <span className="badge badge-success">Decision: {finding.review_decision?.toUpperCase()}</span>
+              )}
             </div>
 
             <h1 style={{ fontSize: '1.4rem', fontWeight: 700, color: 'var(--ds-text-primary)', margin: '0 0 6px 0' }}>
@@ -160,7 +357,7 @@ function EvidenceViewerContent({ params }: { params: Promise<{ id: string }> }) 
           <div
             style={{
               display: 'grid',
-              gridTemplateColumns: 'repeat(3, 1fr)',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
               gap: 16,
               marginTop: 20,
               paddingTop: 20,
@@ -168,23 +365,27 @@ function EvidenceViewerContent({ params }: { params: Promise<{ id: string }> }) 
             }}
           >
             <div style={{ background: 'var(--ds-bg)', padding: '12px 16px', borderRadius: 'var(--ds-radius)' }}>
-              <div style={{ fontSize: '0.75rem', color: 'var(--ds-text-muted)' }}>Variance Amount</div>
+              <div style={{ fontSize: '0.75rem', color: 'var(--ds-text-muted)' }}>Financial Impact / Variance</div>
               <div style={{ fontSize: '1.25rem', fontWeight: 700, color: 'var(--ds-error)' }}>
                 ₹ {finding.financial_impact?.toLocaleString('en-IN')}
               </div>
             </div>
 
             <div style={{ background: 'var(--ds-bg)', padding: '12px 16px', borderRadius: 'var(--ds-radius)' }}>
-              <div style={{ fontSize: '0.75rem', color: 'var(--ds-text-muted)' }}>Document Billed Amount</div>
+              <div style={{ fontSize: '0.75rem', color: 'var(--ds-text-muted)' }}>
+                Observed ({sourceDoc?.category?.replace('_', ' ').toUpperCase() || 'Source Document'})
+              </div>
               <div style={{ fontSize: '1.25rem', fontWeight: 700, color: 'var(--ds-text-primary)' }}>
-                ₹ {parseFloat(finding.source_value || '0').toLocaleString('en-IN') || '68,750.00'}
+                {finding.source_value ? `₹ ${parseFloat(finding.source_value).toLocaleString('en-IN')}` : 'N/A'}
               </div>
             </div>
 
             <div style={{ background: 'var(--ds-bg)', padding: '12px 16px', borderRadius: 'var(--ds-radius)' }}>
-              <div style={{ fontSize: '0.75rem', color: 'var(--ds-text-muted)' }}>PO Approved Amount</div>
+              <div style={{ fontSize: '0.75rem', color: 'var(--ds-text-muted)' }}>
+                Expected ({comparedDoc?.category?.replace('_', ' ').toUpperCase() || 'Comparison Baseline'})
+              </div>
               <div style={{ fontSize: '1.25rem', fontWeight: 700, color: 'var(--ds-text-primary)' }}>
-                ₹ {parseFloat(finding.compared_value || '0').toLocaleString('en-IN') || '88,500.00'}
+                {finding.compared_value ? `₹ ${parseFloat(finding.compared_value).toLocaleString('en-IN')}` : 'N/A'}
               </div>
             </div>
           </div>
@@ -226,7 +427,7 @@ function EvidenceViewerContent({ params }: { params: Promise<{ id: string }> }) 
         </button>
       </div>
 
-      {/* Tab 1: Evidence Split View (Matches Image 1 bottom right) */}
+      {/* Tab 1: Evidence Split View */}
       {activeTab === 'evidence' && (
         <div style={{ display: 'grid', gridTemplateColumns: '1.3fr 0.7fr', gap: 24 }}>
           {/* Left: Original Document Viewer */}
@@ -245,14 +446,26 @@ function EvidenceViewerContent({ params }: { params: Promise<{ id: string }> }) 
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                 <FileText size={18} color="var(--ds-teal-500)" />
                 <span style={{ fontWeight: 600, fontSize: '0.85rem' }}>
-                  {finding.source_document_id ? `${finding.source_document_id}.pdf` : 'INV-5112.pdf'}
+                  {sourceDoc?.file_name || (finding.source_document_id ? `${finding.source_document_id}.pdf` : 'Source Document')}
                 </span>
                 <span className="badge badge-info">Page {currentPage} of {totalPages}</span>
               </div>
 
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                {sourceDoc && (
+                  <a
+                    href={`/api/documents/${sourceDoc.id}/file`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="icon-btn"
+                    title="Download/Open Raw File"
+                    style={{ textDecoration: 'none', color: 'inherit', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                  >
+                    <Download size={16} />
+                  </a>
+                )}
                 <button
-                  onClick={() => setZoomLevel((z) => Math.max(50, z - 10))}
+                  onClick={() => setZoomLevel((z) => Math.max(70, z - 10))}
                   className="icon-btn"
                   title="Zoom Out"
                 >
@@ -262,7 +475,7 @@ function EvidenceViewerContent({ params }: { params: Promise<{ id: string }> }) 
                   {zoomLevel}%
                 </span>
                 <button
-                  onClick={() => setZoomLevel((z) => Math.min(150, z + 10))}
+                  onClick={() => setZoomLevel((z) => Math.min(140, z + 10))}
                   className="icon-btn"
                   title="Zoom In"
                 >
@@ -277,92 +490,16 @@ function EvidenceViewerContent({ params }: { params: Promise<{ id: string }> }) 
                 background: '#fafafa',
                 border: '1px solid var(--ds-border)',
                 borderRadius: 'var(--ds-radius)',
-                padding: '28px 32px',
+                padding: '24px 28px',
                 minHeight: 460,
+                maxHeight: 640,
+                overflowY: 'auto',
                 transform: `scale(${zoomLevel / 100})`,
                 transformOrigin: 'top center',
                 transition: 'transform 0.2s ease',
               }}
             >
-              <div
-                style={{
-                  background: 'white',
-                  padding: 24,
-                  boxShadow: '0 4px 12px rgba(0,0,0,0.06)',
-                  borderRadius: 4,
-                  fontFamily: 'monospace',
-                  fontSize: '0.8rem',
-                  lineHeight: 1.8,
-                }}
-              >
-                <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '2px solid #333', paddingBottom: 10, marginBottom: 16 }}>
-                  <div>
-                    <h3 style={{ margin: 0, fontSize: '1rem', fontFamily: 'sans-serif' }}>METRO SUPPLIES PVT LTD</h3>
-                    <div>Tax Invoice • GSTIN: 27AABCS1429B1Z8</div>
-                  </div>
-                  <div style={{ textAlign: 'right' }}>
-                    <div>Invoice No: <strong>INV-5112</strong></div>
-                    <div>Date: Apr 18, 2025</div>
-                  </div>
-                </div>
-
-                <div style={{ marginBottom: 14 }}>
-                  <div>Billed To: ABC Tech India Operations</div>
-                  <div>PO Reference: <strong>PO-13001</strong></div>
-                </div>
-
-                <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: 16 }}>
-                  <thead>
-                    <tr style={{ borderBottom: '1px solid #ccc' }}>
-                      <th style={{ textAlign: 'left', padding: 4 }}>Description</th>
-                      <th style={{ textAlign: 'right', padding: 4 }}>Qty</th>
-                      <th style={{ textAlign: 'right', padding: 4 }}>Rate</th>
-                      <th style={{ textAlign: 'right', padding: 4 }}>Total</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <tr>
-                      <td style={{ padding: 4 }}>Executive High-Back Chairs</td>
-                      <td style={{ textAlign: 'right', padding: 4 }}>10</td>
-                      <td style={{ textAlign: 'right', padding: 4 }}>6,500.00</td>
-                      <td style={{ textAlign: 'right', padding: 4 }}>65,000.00</td>
-                    </tr>
-                    <tr>
-                      <td style={{ padding: 4 }}>GST (18%) Freight</td>
-                      <td style={{ textAlign: 'right', padding: 4 }}>1</td>
-                      <td style={{ textAlign: 'right', padding: 4 }}>3,750.00</td>
-                      <td style={{ textAlign: 'right', padding: 4 }}>3,750.00</td>
-                    </tr>
-                  </tbody>
-                </table>
-
-                {/* HIGHLIGHTED EVIDENCE BOX */}
-                <div
-                  style={{
-                    display: 'flex',
-                    justifyContent: 'flex-end',
-                    borderTop: '2px solid #333',
-                    paddingTop: 10,
-                  }}
-                >
-                  <div
-                    style={{
-                      background: '#fee2e2',
-                      border: '2px solid #ef4444',
-                      borderRadius: 4,
-                      padding: '6px 14px',
-                      boxShadow: '0 0 10px rgba(239, 68, 68, 0.3)',
-                    }}
-                  >
-                    <div style={{ fontSize: '0.7rem', color: '#991b1b', fontWeight: 700, textTransform: 'uppercase' }}>
-                      Flagged Discrepancy Field
-                    </div>
-                    <div style={{ fontSize: '1.05rem', fontWeight: 800, color: '#b91c1c' }}>
-                      Total Amount: ₹ 68,750.00
-                    </div>
-                  </div>
-                </div>
-              </div>
+              {renderHighlightedDocumentText()}
             </div>
           </div>
 
@@ -376,14 +513,21 @@ function EvidenceViewerContent({ params }: { params: Promise<{ id: string }> }) 
 
               <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
                 <div>
-                  <span style={{ fontSize: '0.75rem', color: 'var(--ds-text-muted)' }}>Extracted Value:</span>
-                  <div style={{ fontWeight: 700, fontSize: '1.1rem', color: 'var(--ds-error)' }}>
-                    ₹ {parseFloat(finding.source_value || '68750').toLocaleString('en-IN')}
+                  <span style={{ fontSize: '0.75rem', color: 'var(--ds-text-muted)' }}>Flagged Field:</span>
+                  <div style={{ fontWeight: 600, fontSize: '0.95rem', color: 'var(--ds-text-primary)' }}>
+                    {finding.source_field || 'Value / Obligation'}
                   </div>
                 </div>
 
                 <div>
-                  <span style={{ fontSize: '0.75rem', color: 'var(--ds-text-muted)' }}>Exact Source Text:</span>
+                  <span style={{ fontSize: '0.75rem', color: 'var(--ds-text-muted)' }}>Observed Value:</span>
+                  <div style={{ fontWeight: 700, fontSize: '1.1rem', color: 'var(--ds-error)' }}>
+                    {finding.source_value ? `₹ ${parseFloat(finding.source_value).toLocaleString('en-IN')}` : 'N/A'}
+                  </div>
+                </div>
+
+                <div>
+                  <span style={{ fontSize: '0.75rem', color: 'var(--ds-text-muted)' }}>Exact Source Passage:</span>
                   <div
                     style={{
                       background: 'var(--ds-bg)',
@@ -393,16 +537,19 @@ function EvidenceViewerContent({ params }: { params: Promise<{ id: string }> }) 
                       fontSize: '0.8rem',
                       marginTop: 4,
                       border: '1px solid var(--ds-border-light)',
+                      wordBreak: 'break-word',
                     }}
                   >
-                    &ldquo;{finding.source_text || 'Total Amount ₹ 68,750.00'}&rdquo;
+                    &ldquo;{finding.source_text || finding.source_value || 'Direct parsed calculation'}&rdquo;
                   </div>
                 </div>
 
                 <div>
                   <span style={{ fontSize: '0.75rem', color: 'var(--ds-text-muted)' }}>Related Comparison:</span>
                   <div style={{ fontSize: '0.85rem', color: 'var(--ds-text-secondary)', marginTop: 4 }}>
-                    PO-13001.pdf • Expected Amount: <strong>₹ {parseFloat(finding.compared_value || '88500').toLocaleString('en-IN')}</strong>
+                    {comparedDoc?.file_name || 'Comparison Document'} • Expected: <strong>
+                      {finding.compared_value ? `₹ ${parseFloat(finding.compared_value).toLocaleString('en-IN')}` : 'N/A'}
+                    </strong>
                   </div>
                 </div>
 
@@ -415,7 +562,7 @@ function EvidenceViewerContent({ params }: { params: Promise<{ id: string }> }) 
               </div>
             </div>
 
-            {/* Suggested Human-in-the-loop Actions (Image 1 bottom right) */}
+            {/* Suggested Human-in-the-loop Actions */}
             <div className="card" style={{ padding: 20 }}>
               <h3 style={{ fontSize: '0.95rem', fontWeight: 600, marginBottom: 14 }}>
                 Suggested Review Actions
@@ -475,7 +622,7 @@ function EvidenceViewerContent({ params }: { params: Promise<{ id: string }> }) 
               >
                 <Shield size={16} style={{ flexShrink: 0, marginTop: 1 }} />
                 <span>
-                  DocuSentinel Human Review: Reviewing a finding does not authorize payment. Legal and financial approval must follow external policy.
+                  DocuSentinel Human Review: Reviewing a finding documents human authorization for audit traceability.
                 </span>
               </div>
             </div>
@@ -489,6 +636,25 @@ function EvidenceViewerContent({ params }: { params: Promise<{ id: string }> }) 
           <h3 style={{ fontSize: '1.05rem', fontWeight: 600, marginBottom: 16 }}>
             Review History & Decision Audit
           </h3>
+
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 16, marginBottom: 24 }}>
+            <div style={{ padding: 14, background: 'var(--ds-bg)', borderRadius: 'var(--ds-radius)' }}>
+              <div style={{ fontSize: '0.75rem', color: 'var(--ds-text-muted)' }}>Source Document</div>
+              <div style={{ fontWeight: 600, fontSize: '0.9rem' }}>{sourceDoc?.file_name || finding.source_document_id || 'N/A'}</div>
+            </div>
+
+            <div style={{ padding: 14, background: 'var(--ds-bg)', borderRadius: 'var(--ds-radius)' }}>
+              <div style={{ fontSize: '0.75rem', color: 'var(--ds-text-muted)' }}>Comparison Document</div>
+              <div style={{ fontWeight: 600, fontSize: '0.9rem' }}>{comparedDoc?.file_name || finding.compared_document_id || 'N/A'}</div>
+            </div>
+
+            <div style={{ padding: 14, background: 'var(--ds-bg)', borderRadius: 'var(--ds-radius)' }}>
+              <div style={{ fontSize: '0.75rem', color: 'var(--ds-text-muted)' }}>Detected On</div>
+              <div style={{ fontWeight: 600, fontSize: '0.9rem' }}>
+                {finding.created_at ? format(new Date(finding.created_at), 'MMM d, yyyy HH:mm:ss') : 'N/A'}
+              </div>
+            </div>
+          </div>
 
           {finding.is_reviewed ? (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>

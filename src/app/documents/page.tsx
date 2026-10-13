@@ -36,7 +36,13 @@ function DocumentsContent() {
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
 
   useEffect(() => {
-    setDocuments(DataStore.getDocuments());
+    let isMounted = true;
+    DataStore.fetchDocuments().then((docs) => {
+      if (isMounted) setDocuments(docs);
+    });
+    return () => {
+      isMounted = false;
+    };
   }, []);
 
   const categories: { key: string; label: string; count: number }[] = [
@@ -59,20 +65,23 @@ function DocumentsContent() {
     return matchesCategory && matchesStatus && matchesSearch;
   });
 
-  const handleDelete = (id: string) => {
-    DataStore.deleteDocument(id);
-    setDocuments(DataStore.getDocuments());
+  const handleDelete = async (id: string) => {
+    await DataStore.deleteDocumentApi(id);
+    const updated = await DataStore.fetchDocuments();
+    setDocuments(updated);
     setDeleteConfirmId(null);
   };
 
-  const handleRetryProcessing = (id: string) => {
+  const handleRetryProcessing = async (id: string) => {
     DataStore.updateDocumentStatus(id, 'processing');
     setDocuments(DataStore.getDocuments());
 
-    setTimeout(() => {
-      DataStore.updateDocumentStatus(id, 'completed');
-      setDocuments(DataStore.getDocuments());
-    }, 1500);
+    try {
+      await DataStore.reprocessDocumentApi(id);
+    } finally {
+      const refreshed = await DataStore.fetchDocuments();
+      setDocuments(refreshed);
+    }
   };
 
   const getFileIcon = (category: DocumentCategory, mimeType: string) => {

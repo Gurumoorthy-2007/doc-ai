@@ -26,8 +26,17 @@ export default function FindingsPage() {
   const [selectedStatus, setSelectedStatus] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState('');
 
+  const [isLoading, setIsLoading] = useState(false);
+
   useEffect(() => {
     setFindings(DataStore.getFindings());
+    setIsLoading(true);
+    DataStore.fetchFindings()
+      .then((data) => {
+        if (data) setFindings(data);
+      })
+      .catch((err) => console.error('Failed to fetch findings:', err))
+      .finally(() => setIsLoading(false));
   }, []);
 
   const totalCount = findings.length;

@@ -57,5 +57,5 @@ ehthumbs.db
 .idea/
 .vscode/*
 !.vscode/settings.json
-!.vscode/extensions.json
-
+# Local data storage
+.data/
