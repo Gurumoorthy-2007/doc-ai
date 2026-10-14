@@ -3,6 +3,7 @@ import { ServerPersistence } from '@/lib/server/persistence';
 import { validateAndInspectFile, saveFileToStorage, deleteFileFromStorage } from '@/lib/server/fileStorage';
 import { extractDocumentWithEvidence } from '@/lib/ai/extraction';
 import { authenticateRequest } from '@/lib/server/auth';
+import { getGlobalRateLimiter, UPLOAD_LIMIT } from '@/lib/server/rateLimit';
 import type { Document, DocumentCategory } from '@/lib/types';
 
 export async function GET(req: NextRequest) {
@@ -59,6 +60,19 @@ export async function POST(req: NextRequest) {
       return NextResponse.json(
         { success: false, error: auth.error || 'Unauthorized: Authentication required' },
         { status: auth.status || 401 }
+      );
+    }
+
+    // ── Rate limit ───────────────────────────────────────────────────
+    const rl = await getGlobalRateLimiter().check(
+      `upload:${auth.user.id}`,
+      UPLOAD_LIMIT.limit,
+      UPLOAD_LIMIT.windowMs
+    );
+    if (!rl.allowed) {
+      return NextResponse.json(
+        { success: false, error: 'Too many upload requests. Please wait before uploading another file.' },
+        { status: 429, headers: { 'Retry-After': String(Math.ceil(rl.resetMs / 1000)) } }
       );
     }
 

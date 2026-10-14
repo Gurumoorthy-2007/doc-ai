@@ -15,23 +15,42 @@ function isSupabaseConfigured(): boolean {
   return Boolean(url && !url.includes('placeholder') && key && !key.includes('placeholder'));
 }
 
+/**
+ * Returns true only when both DEMO_MODE is explicitly enabled AND we are
+ * NOT running in a production environment.  This prevents the demo
+ * fallback from ever activating in production, even if DEMO_MODE leaks
+ * into the env.
+ */
+function isDemoModeAllowed(): boolean {
+  const demoFlag = process.env.DEMO_MODE;
+  const isProduction = process.env.NODE_ENV === 'production';
+  return demoFlag === 'true' && !isProduction;
+}
+
 export const DEFAULT_DEMO_USER: AuthenticatedUser = {
   id: 'usr-demo-admin-001',
-  email: 'gurumoorthy@docusentinel.ai',
-  name: 'Gurumoorthy S',
+  email: 'demo@docusentinel.local',
+  name: 'Demo User',
   role: 'admin',
 };
 
 /**
  * Server-side trusted authentication extractor.
- * Validates session from Authorization header (Bearer token) or Supabase auth session.
+ *
+ * Authentication sources (in priority order):
+ *   1. Supabase JWT — verified via Supabase Auth, role from `profiles` table.
+ *   2. Demo fallback — returns a fixed demo admin user, but ONLY when
+ *      `DEMO_MODE=true` AND `NODE_ENV !== 'production'`.
+ *
+ * Header-based and structured-token role claims have been removed.
+ * Roles MUST come from a verified session or the database.
  */
 export async function authenticateRequest(
   req: NextRequest
 ): Promise<{ user: AuthenticatedUser | null; error?: string; status?: number }> {
   const authHeader = req.headers.get('authorization');
 
-  // 1. Supabase configured: verify JWT with Supabase auth
+  // ── 1. Supabase configured: verify JWT with Supabase auth ──────────
   if (isSupabaseConfigured()) {
     const supabase = createServerSupabase();
     let token: string | null = null;
@@ -82,60 +101,17 @@ export async function authenticateRequest(
     }
   }
 
-  // 2. Local / Demo mode session handling
-  // If explicitly unauthenticated header is sent or requested
-  if (authHeader) {
-    const token = authHeader.replace(/^Bearer\s+/i, '').trim();
-
-    // Support structured demo tokens: "id:email:name:role"
-    if (token.includes(':')) {
-      const parts = token.split(':');
-      const [id, email, name, role] = parts;
-      const validRole = (role === 'admin' || role === 'reviewer' || role === 'user') ? role : 'user';
-      return {
-        user: {
-          id: id || 'usr-custom',
-          email: email || `${id}@docusentinel.ai`,
-          name: name ? decodeURIComponent(name) : 'User',
-          role: validRole,
-        },
-      };
-    }
-
-    if (token === 'unauthenticated' || token === 'invalid') {
-      return { user: null, error: 'Unauthorized: Invalid authentication credentials', status: 401 };
-    }
-
-    if (token && token !== 'demo') {
-      return {
-        user: {
-          id: token,
-          email: `${token}@docusentinel.ai`,
-          name: token.replace(/^usr-/, '').replace(/[-_]/g, ' '),
-          role: token.includes('admin') ? 'admin' : token.includes('reviewer') ? 'reviewer' : 'user',
-        },
-      };
-    }
+  // ── 2. Demo mode (non-production only) ─────────────────────────────
+  if (isDemoModeAllowed()) {
+    return { user: DEFAULT_DEMO_USER };
   }
 
-  // Check custom user headers for browser demo state
-  const customUserId = req.headers.get('x-user-id');
-  if (customUserId) {
-    const customEmail = req.headers.get('x-user-email') || `${customUserId}@docusentinel.ai`;
-    const customName = req.headers.get('x-user-name') || 'User';
-    const customRole = (req.headers.get('x-user-role') as 'admin' | 'reviewer' | 'user') || 'user';
-    return {
-      user: {
-        id: customUserId,
-        email: customEmail,
-        name: customName,
-        role: customRole,
-      },
-    };
-  }
-
-  // Default to demo admin in development/demo mode when no conflicting headers exist
-  return { user: DEFAULT_DEMO_USER };
+  // ── 3. No valid auth source — reject ───────────────────────────────
+  return {
+    user: null,
+    error: 'Unauthorized: No authentication provider configured. Set Supabase credentials or enable DEMO_MODE=true in a non-production environment.',
+    status: 401,
+  };
 }
 
 /**

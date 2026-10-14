@@ -284,7 +284,8 @@ export class ServerPersistence {
     findingId: string,
     decision: 'accepted' | 'rejected' | 'reviewing' | 'resolved',
     comments: string,
-    reviewerName: string = 'Gurumoorthy S'
+    reviewerName: string = 'Demo Reviewer',
+    reviewerEmail?: string
   ): Promise<Finding | null> {
     const db = await readDatabase();
     const finding = db.findings.find((f) => f.id === findingId);
@@ -322,7 +323,7 @@ export class ServerPersistence {
     // Add audit event
     await this.addAuditEvent({
       user_name: reviewerName,
-      user_email: 'gurumoorthy@docusentinel.ai',
+      user_email: reviewerEmail || 'demo@docusentinel.local',
       action: 'Finding Reviewed',
       entity_type: 'finding',
       entity_id: findingId,
@@ -342,7 +343,7 @@ export class ServerPersistence {
   ): Promise<boolean> {
     if (!docId) return false;
     if (!userId) return false;
-    if (userRole === 'admin' || userRole === 'reviewer' || userId === 'usr-demo-admin-001') {
+    if (userRole === 'admin' || userRole === 'reviewer') {
       return true;
     }
     const doc = await this.getDocumentById(docId);
@@ -357,7 +358,7 @@ export class ServerPersistence {
   ): Promise<boolean> {
     if (!findingId) return false;
     if (!userId) return false;
-    if (userRole === 'admin' || userRole === 'reviewer' || userId === 'usr-demo-admin-001') {
+    if (userRole === 'admin' || userRole === 'reviewer') {
       return true;
     }
     const finding = await this.getFindingById(findingId);

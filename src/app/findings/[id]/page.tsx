@@ -4,6 +4,7 @@ import { Suspense, useState, useEffect, use } from 'react';
 import Link from 'next/link';
 import AppShell from '@/components/layout/AppShell';
 import { DataStore } from '@/lib/data/store';
+import { useAuth } from '@/lib/auth/AuthContext';
 import type { Finding, Document, ExtractedField } from '@/lib/types';
 import {
   ArrowLeft,
@@ -41,6 +42,7 @@ interface AiExplanationData {
 
 function EvidenceViewerContent({ params }: { params: Promise<{ id: string }> }) {
   const resolvedParams = use(params);
+  const { profile } = useAuth();
 
   const [finding, setFinding] = useState<Finding | null>(null);
   const [sourceDoc, setSourceDoc] = useState<Document | null>(null);
@@ -153,7 +155,7 @@ function EvidenceViewerContent({ params }: { params: Promise<{ id: string }> }) 
         finding.id,
         reviewDecision,
         reviewComment,
-        'Gurumoorthy S'
+        profile?.full_name || 'Reviewer'
       );
       if (updated) {
         setFinding(updated);
@@ -906,7 +908,7 @@ function EvidenceViewerContent({ params }: { params: Promise<{ id: string }> }) 
               >
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
                   <span style={{ fontWeight: 600, color: 'var(--ds-text-primary)' }}>
-                    Reviewed by {finding.reviewed_by || 'Gurumoorthy S'}
+                    Reviewed by {finding.reviewed_by || 'Reviewer'}
                   </span>
                   <span className="badge badge-success">
                     Decision: {finding.review_decision?.toUpperCase()}

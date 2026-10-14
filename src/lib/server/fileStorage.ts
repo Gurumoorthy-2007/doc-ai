@@ -5,8 +5,9 @@ import { createRequire } from 'module';
 
 const require = createRequire(import.meta.url);
 
-// Max file size: 50MB
-export const MAX_FILE_SIZE_BYTES = 50 * 1024 * 1024;
+// Max file size: configurable via MAX_FILE_SIZE_MB env var, defaulting to 50MB
+export const MAX_FILE_SIZE_MB = Number(process.env.MAX_FILE_SIZE_MB) || 50;
+export const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
 
 export interface ValidatedFile {
   buffer: Buffer;
@@ -84,7 +85,7 @@ export async function validateAndInspectFile(
   }
   if (buffer.length > MAX_FILE_SIZE_BYTES) {
     throw new Error(
-      `File "${sanitizedFileName}" exceeds maximum allowed size of 50MB (received ${(buffer.length / (1024 * 1024)).toFixed(1)}MB).`
+      `File "${sanitizedFileName}" exceeds maximum allowed size of ${MAX_FILE_SIZE_MB}MB (received ${(buffer.length / (1024 * 1024)).toFixed(1)}MB).`
     );
   }
 

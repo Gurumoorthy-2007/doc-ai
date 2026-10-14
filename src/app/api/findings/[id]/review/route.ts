@@ -48,14 +48,16 @@ export async function POST(
       );
     }
 
-    // Never trust reviewer name from client payload: derive from trusted server session!
+    // Never trust reviewer identity from client payload: derive from trusted server session!
     const verifiedReviewerName = auth.user.name;
+    const verifiedReviewerEmail = auth.user.email;
 
     const updated = await ServerPersistence.updateFindingReview(
       id,
       decision,
       comments,
-      verifiedReviewerName
+      verifiedReviewerName,
+      verifiedReviewerEmail
     );
 
     if (!updated) {

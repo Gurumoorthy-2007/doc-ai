@@ -3,6 +3,7 @@ import { ServerPersistence } from '@/lib/server/persistence';
 import { getFileFromStorage, validateAndInspectFile } from '@/lib/server/fileStorage';
 import { extractDocumentWithEvidence } from '@/lib/ai/extraction';
 import { authenticateRequest, checkDocumentOwnership } from '@/lib/server/auth';
+import { getGlobalRateLimiter, PROCESS_LIMIT } from '@/lib/server/rateLimit';
 
 export async function POST(
   req: NextRequest,
@@ -14,6 +15,19 @@ export async function POST(
       return NextResponse.json(
         { success: false, error: auth.error || 'Unauthorized: Authentication required' },
         { status: auth.status || 401 }
+      );
+    }
+
+    // ── Rate limit ───────────────────────────────────────────────────
+    const rl = await getGlobalRateLimiter().check(
+      `process:${auth.user.id}`,
+      PROCESS_LIMIT.limit,
+      PROCESS_LIMIT.windowMs
+    );
+    if (!rl.allowed) {
+      return NextResponse.json(
+        { success: false, error: 'Too many processing requests. Please wait before processing again.' },
+        { status: 429, headers: { 'Retry-After': String(Math.ceil(rl.resetMs / 1000)) } }
       );
     }
 

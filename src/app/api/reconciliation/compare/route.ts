@@ -1,13 +1,34 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { ServerPersistence } from '@/lib/server/persistence';
 import { isNvidiaConfigured, compareDocumentsWithNvidia } from '@/lib/ai/nvidia';
+import { authenticateRequest } from '@/lib/server/auth';
+import { getGlobalRateLimiter, AI_ROUTE_LIMIT } from '@/lib/server/rateLimit';
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json().catch(() => ({}));
-    const { contractId, purchaseOrderId, invoiceId } = body;
+    // ── Auth ──────────────────────────────────────────────────────────
+    const auth = await authenticateRequest(req);
+    if (!auth.user) {
+      return NextResponse.json(
+        { success: false, error: auth.error || 'Unauthorized: Authentication required' },
+        { status: auth.status || 401 }
+      );
+    }
 
-    const allDocs = await ServerPersistence.getDocuments();
+    // ── Rate limit ───────────────────────────────────────────────────
+    const rl = await getGlobalRateLimiter().check(
+      `compare:${auth.user.id}`,
+      AI_ROUTE_LIMIT.limit,
+      AI_ROUTE_LIMIT.windowMs
+    );
+    if (!rl.allowed) {
+      return NextResponse.json(
+        { success: false, error: 'Too many requests. Please wait before requesting another comparison.' },
+        { status: 429, headers: { 'Retry-After': String(Math.ceil(rl.resetMs / 1000)) } }
+      );
+    }
+
+    const body = await req.json().catch(() => ({}));
     const allFields = await ServerPersistence.getExtractedFields();
 
     const getDocFieldsMap = (docId?: string) => {

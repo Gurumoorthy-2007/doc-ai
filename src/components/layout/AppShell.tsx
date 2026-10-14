@@ -60,7 +60,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         .join('')
         .toUpperCase()
         .slice(0, 2)
-    : 'GS';
+    : 'U';
 
   const navItems = [
     { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
@@ -148,7 +148,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         <div className="sidebar-user" onClick={() => setShowUserMenu(!showUserMenu)} style={{ cursor: 'pointer' }}>
           <div className="avatar">{initials}</div>
           <div className="user-info">
-            <div className="user-name">{profile?.full_name || 'Gurumoorthy S'}</div>
+            <div className="user-name">{profile?.full_name || 'User'}</div>
             <div className="user-role">{profile?.role ? profile.role.toUpperCase() : 'Admin'}</div>
           </div>
           <button
@@ -247,8 +247,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                   }}
                 >
                   <div style={{ padding: '8px 12px', borderBottom: '1px solid var(--ds-border)' }}>
-                    <div style={{ fontWeight: 600, fontSize: '0.875rem' }}>{profile?.full_name || 'Gurumoorthy S'}</div>
-                    <div style={{ fontSize: '0.75rem', color: 'var(--ds-text-muted)' }}>{profile?.email || 'gurumoorthy@docusentinel.ai'}</div>
+                    <div style={{ fontWeight: 600, fontSize: '0.875rem' }}>{profile?.full_name || 'User'}</div>
+                    <div style={{ fontSize: '0.75rem', color: 'var(--ds-text-muted)' }}>{profile?.email || 'user@docusentinel.local'}</div>
                   </div>
                   <div style={{ marginTop: 4 }}>
                     <button

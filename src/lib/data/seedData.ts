@@ -718,8 +718,8 @@ export const INITIAL_FINDINGS: Finding[] = [
 export const INITIAL_AUDIT_EVENTS: AuditEvent[] = [
   {
     id: 'aud-001',
-    user_name: 'Gurumoorthy S',
-    user_email: 'gurumoorthy@docusentinel.ai',
+    user_name: 'Demo User',
+    user_email: 'demo@docusentinel.local',
     action: 'Document Uploaded',
     entity_type: 'document',
     entity_id: 'doc-inv-4827',
@@ -730,7 +730,7 @@ export const INITIAL_AUDIT_EVENTS: AuditEvent[] = [
   {
     id: 'aud-002',
     user_name: 'System (AI Engine)',
-    user_email: 'system@docusentinel.ai',
+    user_email: 'system@docusentinel.local',
     action: 'AI Extraction Completed',
     entity_type: 'document',
     entity_id: 'doc-inv-4827',
@@ -741,7 +741,7 @@ export const INITIAL_AUDIT_EVENTS: AuditEvent[] = [
   {
     id: 'aud-003',
     user_name: 'System (Reconciliation)',
-    user_email: 'system@docusentinel.ai',
+    user_email: 'system@docusentinel.local',
     action: 'Reconciliation Executed',
     entity_type: 'reconciliation',
     entity_id: 'rec-grp-001',
@@ -752,7 +752,7 @@ export const INITIAL_AUDIT_EVENTS: AuditEvent[] = [
   {
     id: 'aud-004',
     user_name: 'System (Finding Engine)',
-    user_email: 'system@docusentinel.ai',
+    user_email: 'system@docusentinel.local',
     action: 'Finding Created',
     entity_type: 'finding',
     entity_id: 'F-001',
@@ -762,8 +762,8 @@ export const INITIAL_AUDIT_EVENTS: AuditEvent[] = [
   },
   {
     id: 'aud-005',
-    user_name: 'Gurumoorthy S',
-    user_email: 'gurumoorthy@docusentinel.ai',
+    user_name: 'Demo Reviewer',
+    user_email: 'demo@docusentinel.local',
     action: 'Finding Reviewed',
     entity_type: 'finding',
     entity_id: 'F-004',

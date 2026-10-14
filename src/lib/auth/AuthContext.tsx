@@ -24,10 +24,10 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 const DEFAULT_DEMO_USER: User = {
   id: 'usr-demo-admin-001',
   app_metadata: {},
-  user_metadata: { full_name: 'Gurumoorthy S' },
+  user_metadata: { full_name: 'Demo User' },
   aud: 'authenticated',
   created_at: new Date().toISOString(),
-  email: 'gurumoorthy@docusentinel.ai',
+  email: 'demo@docusentinel.local',
   phone: '',
   role: 'authenticated',
   updated_at: new Date().toISOString(),
@@ -35,8 +35,8 @@ const DEFAULT_DEMO_USER: User = {
 
 const DEFAULT_DEMO_PROFILE: Profile = {
   id: 'usr-demo-admin-001',
-  full_name: 'Gurumoorthy S',
-  email: 'gurumoorthy@docusentinel.ai',
+  full_name: 'Demo User',
+  email: 'demo@docusentinel.local',
   avatar_url: null,
   role: 'admin',
   created_at: new Date().toISOString(),

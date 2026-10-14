@@ -87,8 +87,8 @@ export class DataStore {
 
     // Audit log
     this.addAuditEvent({
-      user_name: 'Gurumoorthy S',
-      user_email: 'gurumoorthy@docusentinel.ai',
+      user_name: 'Demo User',
+      user_email: 'demo@docusentinel.local',
       action: 'Document Uploaded',
       entity_type: 'document',
       entity_id: doc.id,
@@ -121,8 +121,8 @@ export class DataStore {
 
     if (doc) {
       this.addAuditEvent({
-        user_name: 'Gurumoorthy S',
-        user_email: 'gurumoorthy@docusentinel.ai',
+        user_name: 'Demo User',
+        user_email: 'demo@docusentinel.local',
         action: 'Document Deleted',
         entity_type: 'document',
         entity_id: doc.id,
@@ -180,7 +180,7 @@ export class DataStore {
     findingId: string,
     decision: 'accepted' | 'rejected' | 'reviewing' | 'resolved',
     comments: string,
-    userName: string = 'Gurumoorthy S'
+    userName: string = 'Demo Reviewer'
   ): Finding | null {
     const findings = this.getFindings();
     let updatedFinding: Finding | null = null;
@@ -227,7 +227,7 @@ export class DataStore {
     if (updatedFinding) {
       this.addAuditEvent({
         user_name: userName,
-        user_email: 'gurumoorthy@docusentinel.ai',
+        user_email: 'demo@docusentinel.local',
         action: 'Finding Reviewed',
         entity_type: 'finding',
         entity_id: findingId,
@@ -501,7 +501,7 @@ export class DataStore {
     findingId: string,
     decision: 'accepted' | 'rejected' | 'reviewing' | 'resolved',
     comments: string,
-    reviewerName: string = 'Gurumoorthy S'
+    reviewerName: string = 'Demo Reviewer'
   ): Promise<Finding | null> {
     try {
       const res = await fetch(`/api/findings/${findingId}/review`, {

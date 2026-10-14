@@ -1,12 +1,36 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { ServerPersistence } from '@/lib/server/persistence';
 import { isNvidiaConfigured, explainFindingWithNvidia } from '@/lib/ai/nvidia';
+import { authenticateRequest } from '@/lib/server/auth';
+import { getGlobalRateLimiter, AI_ROUTE_LIMIT } from '@/lib/server/rateLimit';
 
 export async function POST(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    // ── Auth ──────────────────────────────────────────────────────────
+    const auth = await authenticateRequest(req);
+    if (!auth.user) {
+      return NextResponse.json(
+        { success: false, error: auth.error || 'Unauthorized: Authentication required' },
+        { status: auth.status || 401 }
+      );
+    }
+
+    // ── Rate limit ───────────────────────────────────────────────────
+    const rl = await getGlobalRateLimiter().check(
+      `explain:${auth.user.id}`,
+      AI_ROUTE_LIMIT.limit,
+      AI_ROUTE_LIMIT.windowMs
+    );
+    if (!rl.allowed) {
+      return NextResponse.json(
+        { success: false, error: 'Too many requests. Please wait before requesting another explanation.' },
+        { status: 429, headers: { 'Retry-After': String(Math.ceil(rl.resetMs / 1000)) } }
+      );
+    }
+
     const { id } = await params;
     const finding = await ServerPersistence.getFindingById(id);
 
@@ -90,10 +114,10 @@ export async function POST(
       };
     }
 
-    // Record audit event
+    // Record audit event with verified user identity
     await ServerPersistence.addAuditEvent({
-      user_name: 'Gurumoorthy S',
-      user_email: 'gurumoorthy@docusentinel.ai',
+      user_name: auth.user.name,
+      user_email: auth.user.email,
       action: 'Finding Explained by AI',
       entity_type: 'finding',
       entity_id: finding.id,

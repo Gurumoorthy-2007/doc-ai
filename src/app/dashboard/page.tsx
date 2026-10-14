@@ -105,7 +105,7 @@ export default function DashboardPage() {
             <span>Overview & Compliance Dashboard</span>
           </h1>
           <p className="page-subtitle">
-            Welcome back, {profile?.full_name?.split(' ')[0] || 'Gurumoorthy'}. Continuous 3-way reconciliation and forensic document intelligence overview.
+            Welcome back, {profile?.full_name?.split(' ')[0] || 'User'}. Continuous 3-way reconciliation and forensic document intelligence overview.
           </p>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>

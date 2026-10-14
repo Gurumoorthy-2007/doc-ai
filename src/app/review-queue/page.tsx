@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import AppShell from '@/components/layout/AppShell';
 import { DataStore } from '@/lib/data/store';
+import { useAuth } from '@/lib/auth/AuthContext';
 import type { Finding } from '@/lib/types';
 import {
   ClipboardCheck,
@@ -23,6 +24,7 @@ import {
 import { format } from 'date-fns';
 
 export default function ReviewQueuePage() {
+  const { profile } = useAuth();
   const [findings, setFindings] = useState<Finding[]>([]);
   const [selectedFindingId, setSelectedFindingId] = useState<string | null>(null);
   const [decision, setDecision] = useState<'accepted' | 'rejected' | 'reviewing' | 'resolved'>('accepted');
@@ -63,7 +65,7 @@ export default function ReviewQueuePage() {
         activeFinding.id,
         decision,
         comments,
-        'Gurumoorthy S'
+        profile?.full_name || 'Reviewer'
       );
       if (updated) {
         setFindings((prev) => prev.map((f) => (f.id === updated.id ? updated : f)));
@@ -500,7 +502,7 @@ export default function ReviewQueuePage() {
                     <div style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--ds-success)', marginTop: 6 }} />
                     <div>
                       <div style={{ fontSize: '0.82rem', fontWeight: 600, color: 'var(--ds-text-primary)' }}>
-                        Reviewed by {activeFinding.reviewed_by || 'Gurumoorthy S'} • Status: {activeFinding.status.toUpperCase()}
+                        Reviewed by {activeFinding.reviewed_by || 'Reviewer'} • Status: {activeFinding.status.toUpperCase()}
                       </div>
                       <p style={{ fontSize: '0.78rem', color: 'var(--ds-text-secondary)', margin: '2px 0 0 0' }}>
                         &ldquo;{activeFinding.review_comments || 'Approved with note'}&rdquo;
