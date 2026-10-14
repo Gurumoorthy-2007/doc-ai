@@ -1,0 +1,29 @@
+{
+  "file_name": "date_predates_po_inv.pdf",
+  "category": "invoice",
+  "expected_fields": {
+    "invoice_number": {
+      "value": "INV-2026-017",
+      "verified": true
+    },
+    "date": {
+      "value": "2026-01-10",
+      "verified": true
+    },
+    "total": {
+      "value": "14000.00",
+      "numeric": 14000,
+      "verified": true
+    },
+    "po_reference": {
+      "value": "PO-FUTURE-8800",
+      "verified": true
+    }
+  },
+  "expected_line_items": [],
+  "expected_findings": [
+    "RULE_INVOICE_PREDATES_PO"
+  ],
+  "scenario_description": "Invoice dated prior to the issuance date of the referenced PO.",
+  "content_text": "TAX INVOICE\nRetroactive Services Ltd\nInvoice Number: INV-2026-017\nInvoice Date: 2026-01-10\nPO Reference: PO-FUTURE-8800\nBill To: Enterprise Client\nTotal Amount Due: $14,000.00"
+}

@@ -1,0 +1,31 @@
+{
+  "file_name": "clean_po_01.pdf",
+  "category": "purchase_order",
+  "expected_fields": {
+    "po_number": {
+      "value": "PO-88001",
+      "verified": true
+    },
+    "total": {
+      "value": "7080.00",
+      "numeric": 7080,
+      "verified": true
+    },
+    "supplier_name": {
+      "value": "Acme Global Solutions Pvt Ltd",
+      "verified": true
+    },
+    "currency": {
+      "value": "USD",
+      "verified": true
+    },
+    "contract_reference": {
+      "value": "MSA-2026-01",
+      "verified": true
+    }
+  },
+  "expected_line_items": [],
+  "expected_findings": [],
+  "scenario_description": "Approved purchase order perfectly matching clean_invoice_01.pdf.",
+  "content_text": "PURCHASE ORDER\nGlobex Corporation Procurement\nPO Number: PO-88001\nOrder Date: 2026-03-10\nVendor: Acme Global Solutions Pvt Ltd\nDeliver To: Globex Tech Center, Floor 5\nContract Reference: MSA-2026-01\nItem: Cloud Architecture Consulting - Qty: 40 - Rate: 150.00 - Total: 6,000.00\nSubtotal: $6,000.00\nTax: $1,080.00\nTotal Committed: $7,080.00\nCurrency: USD\nAuthorized Purchaser: VP Engineering"
+}

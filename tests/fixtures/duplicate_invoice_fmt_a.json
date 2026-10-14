@@ -1,0 +1,27 @@
+{
+  "file_name": "duplicate_invoice_fmt_a.pdf",
+  "category": "invoice",
+  "expected_fields": {
+    "invoice_number": {
+      "value": "INV-2026-880",
+      "verified": true
+    },
+    "total": {
+      "value": "100000.00",
+      "numeric": 100000,
+      "verified": true
+    },
+    "currency": {
+      "value": "INR",
+      "verified": true
+    },
+    "supplier_name": {
+      "value": "Tech Mahindra Ltd",
+      "verified": true
+    }
+  },
+  "expected_line_items": [],
+  "expected_findings": [],
+  "scenario_description": "Original invoice format for duplicate collision testing.",
+  "content_text": "TAX INVOICE\nTech Mahindra Ltd\nInvoice #INV-2026-880\nInvoice Date: 2026-04-01\nBill To: Enterprise India Pvt Ltd\nTotal Amount Due: INR 100000.00\nGSTIN: 27AABCT3518Q1ZV"
+}

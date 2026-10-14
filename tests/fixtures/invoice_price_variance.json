@@ -1,0 +1,29 @@
+{
+  "file_name": "invoice_price_variance.pdf",
+  "category": "invoice",
+  "expected_fields": {
+    "invoice_number": {
+      "value": "INV-2026-004",
+      "verified": true
+    },
+    "total": {
+      "value": "15000.00",
+      "numeric": 15000,
+      "verified": true
+    },
+    "supplier_name": {
+      "value": "Beta Technologies Inc",
+      "verified": true
+    },
+    "currency": {
+      "value": "USD",
+      "verified": true
+    }
+  },
+  "expected_line_items": [],
+  "expected_findings": [
+    "RULE_INVOICE_EXCEEDS_PO"
+  ],
+  "scenario_description": "Invoice with unauthorized rate markup over baseline purchase order rate.",
+  "content_text": "TAX INVOICE\nBeta Technologies Inc\nInvoice Number: INV-2026-004\nDate: 2026-04-10\nPO Reference: PO-88004\nBill To: Globex Corp\nItem: Managed DevOps Services - Qty: 100 - Rate: 150.00 - Total: 15,000.00\nSubtotal: $15,000.00\nTotal: $15,000.00\nCurrency: USD"
+}

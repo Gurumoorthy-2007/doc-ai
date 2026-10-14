@@ -1,0 +1,45 @@
+%PDF-1.4
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [3 0 R] /Count 1 >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>
+endobj
+4 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+5 0 obj
+<< /Length 459 >>
+stream
+BT /F1 12 Tf 50 750 Td 14 TL
+(TAX INVOICE) Tj 
+(Apex Hardware Solutions Pvt Ltd) ' 
+(Invoice Number: INV-2026-013) ' 
+(Invoice Date: 2026-05-10) ' 
+(PO Reference: PO-IN-44090) ' 
+(Bill To: Enterprise India Corp) ' 
+(GSTIN: 27AAAAA0000A1Z5) ' 
+(Item: High-Performance Rack Servers - Qty: 5 - Rate: 100,000.00 - Amount: 500,000.00) ' 
+(Subtotal: INR 500,000.00) ' 
+(Tax \(18% IGST\): INR 90,000.00) ' 
+(Total Amount Due: INR 590,000.00) ' 
+(Currency: INR) ' 
+ET
+endstream
+endobj
+xref
+0 6
+0000000000 65535 f 
+0000000009 00000 n 
+0000000058 00000 n 
+0000000115 00000 n 
+0000000241 00000 n 
+0000000311 00000 n 
+trailer
+<< /Size 6 /Root 1 0 R >>
+startxref
+821
+%%EOF

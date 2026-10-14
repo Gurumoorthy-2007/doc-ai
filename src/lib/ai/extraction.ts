@@ -56,17 +56,27 @@ export function extractFromTextRegex(
   // Find supplier / vendor from text header
   let detectedSupplier: string | null = null;
   let supplierSourceText: string | null = null;
-  for (const line of lines.slice(0, 15)) {
-    const supplierMatch = line.match(/(?:supplier|vendor|from|company|issued by|billed by|agreement between)\s*[:\-]?\s*([A-Za-z0-9&.,\s]{3,50})/i);
+
+  // 1. First pass: explicit label match
+  for (const line of lines.slice(0, 20)) {
+    const supplierMatch = line.match(/(?:supplier(?:\s*name)?|vendor(?:\s*name)?|issued by|billed by|agreement between)\s*[:\-]?\s*([A-Za-z0-9&.,\s]{3,50})/i);
     if (supplierMatch) {
       detectedSupplier = supplierMatch[1].trim();
       supplierSourceText = line;
       break;
     }
-    if (/ltd|pvt|inc|corp|llc|solutions|technologies|enterprises|supplies|logistics/i.test(line)) {
-      detectedSupplier = line.replace(/[^A-Za-z0-9&.,\s]/g, '').trim();
-      supplierSourceText = line;
-      break;
+  }
+
+  // 2. Second pass: entity corporate suffix fallback
+  if (!detectedSupplier) {
+    for (const line of lines.slice(0, 15)) {
+      if (/ltd|pvt|inc|corp|llc|solutions|technologies|enterprises|supplies|logistics/i.test(line)) {
+        if (!/procurement|board of directors|executive summary|deliver to|ship to|bill to/i.test(line)) {
+          detectedSupplier = line.replace(/[^A-Za-z0-9&.,\s]/g, '').trim();
+          supplierSourceText = line;
+          break;
+        }
+      }
     }
   }
 
@@ -75,13 +85,16 @@ export function extractFromTextRegex(
   let currencySourceText: string | null = null;
   if (/USD|\$|dollar/i.test(text)) {
     detectedCurrency = 'USD';
-    currencySourceText = '$ / USD';
+    const match = text.match(/\bUSD\b|\$/i);
+    currencySourceText = match ? match[0] : 'USD';
   } else if (/EUR|€|euro/i.test(text)) {
     detectedCurrency = 'EUR';
-    currencySourceText = '€ / EUR';
+    const match = text.match(/\bEUR\b|€/i);
+    currencySourceText = match ? match[0] : 'EUR';
   } else if (/INR|₹|rs\.?|rupee/i.test(text)) {
     detectedCurrency = 'INR';
-    currencySourceText = '₹ / INR';
+    const match = text.match(/\bINR\b|₹|Rs\.?/i);
+    currencySourceText = match ? match[0] : 'INR';
   }
 
   // Detect monetary amounts
@@ -100,16 +113,16 @@ export function extractFromTextRegex(
   };
 
   const CURRENCY_PREFIX = '(?:(?:INR|USD|EUR|GBP|Rs\\.?|[₹$€])\\s*)?';
-  const totalInfo = parseAmountFromLine(new RegExp(`(?:\\b(?:grand total|total amount|total invoice amount|invoice total amount|invoice total|amount payable|net amount|po total amount|purchase order total|contract ceiling|total value|contract value)\\b|\\btotal\\b)\\s*[:\\-]?\\s*${CURRENCY_PREFIX}([0-9,]+(?:\\.[0-9]{1,2})?)`, 'i'));
+  const totalInfo = parseAmountFromLine(new RegExp(`(?:\\b(?:grand total|total amount due|total amount|total invoice amount|invoice total amount|invoice total|total committed|gross payable|amount payable|net amount|po total amount|purchase order total|contract ceiling|contract value cap|contract value|contract cap|total value)\\b|\\btotal\\b)\\s*[:\\-]?\\s*${CURRENCY_PREFIX}([0-9,]+(?:\\.[0-9]{1,2})?)`, 'i'));
   const subtotalInfo = parseAmountFromLine(new RegExp(`(?:\\bsubtotal\\b|\\bsub-total\\b|\\bsub total\\b|\\bbase amount\\b)\\s*[:\\-]?\\s*${CURRENCY_PREFIX}([0-9,]+(?:\\.[0-9]{1,2})?)`, 'i'));
-  const taxInfo = parseAmountFromLine(new RegExp(`(?:\\btax\\b|\\bgst\\b|\\bvat\\b|\\bcgst\\b|\\bsgst\\b|\\bigst\\b)\\s*[:\\-]?\\s*${CURRENCY_PREFIX}([0-9,]+(?:\\.[0-9]{1,2})?)`, 'i'));
+  const taxInfo = parseAmountFromLine(new RegExp(`(?:\\btax\\b|\\bgst\\b|\\bvat\\b|\\bcgst\\b|\\bsgst\\b|\\bigst\\b)(?:\\s*\\([^)]*\\))?\\s*[:\\-]?\\s*${CURRENCY_PREFIX}([0-9,]+(?:\\.[0-9]{1,2})?)`, 'i'));
   const discountInfo = parseAmountFromLine(new RegExp(`(?:\\bdiscount\\b|\\brebate\\b|\\bconcession\\b)\\s*[:\\-]?\\s*${CURRENCY_PREFIX}([0-9,]+(?:\\.[0-9]{1,2})?)`, 'i'));
 
   // Detect customer / client / buyer
   let detectedCustomer: string | null = null;
   let customerSourceText: string | null = null;
   for (const line of lines.slice(0, 20)) {
-    const custMatch = line.match(/(?:bill to|billed to|client|customer|buyer|purchaser|invoice to)\s*[:\-]?\s*([A-Za-z0-9&.,\s]{3,50})/i);
+    const custMatch = line.match(/(?:bill to|billed to|client|customer|buyer|deliver to|ship to|purchaser|invoice to)\s*[:\-]?\s*([A-Za-z0-9&.,\s]{3,50})/i);
     if (custMatch) {
       detectedCustomer = custMatch[1].trim();
       customerSourceText = line;
@@ -158,20 +171,10 @@ export function extractFromTextRegex(
     return { id: null, sourceText: null };
   };
 
-  const invoiceNoInfo = parseIdFromLine(/(?:invoice\s*(?:number|num|no\.?|#)?)\s*[:\-]\s*([A-Za-z0-9\-_/]+)/i).id
-    ? parseIdFromLine(/(?:invoice\s*(?:number|num|no\.?|#)?)\s*[:\-]\s*([A-Za-z0-9\-_/]+)/i)
-    : parseIdFromLine(/(?:invoice\s+(?:number|num|no\.?|#)?)\s*[:\-]?\s*([A-Za-z0-9\-_/]+)/i);
-
-  const poNoInfo = parseIdFromLine(/(?:purchase order|po)\s*(?:number|num|no\.?|#)?\s*[:\-]\s*([A-Za-z0-9\-_/]+)/i).id
-    ? parseIdFromLine(/(?:purchase order|po)\s*(?:number|num|no\.?|#)?\s*[:\-]\s*([A-Za-z0-9\-_/]+)/i)
-    : parseIdFromLine(/(?:purchase order|po)\s*(?:number|num|no\.?|#)?\s*[:\-]?\s*([A-Za-z0-9\-_/]+)/i);
-
-  const contractNoInfo = parseIdFromLine(/(?:contract|agreement)\s*(?:number|num|no\.?|#)?\s*[:\-]\s*([A-Za-z0-9\-_/]+)/i).id
-    ? parseIdFromLine(/(?:contract|agreement)\s*(?:number|num|no\.?|#)?\s*[:\-]\s*([A-Za-z0-9\-_/]+)/i)
-    : parseIdFromLine(/(?:contract|agreement)\s*(?:number|num|no\.?|#)?\s*[:\-]?\s*([A-Za-z0-9\-_/]+)/i);
-
-  // Detect contract reference on PO or invoice
-  const contractRefInfo = parseIdFromLine(/(?:contract\s*ref(?:erence)?|master agreement|msa\s*ref)\s*[:\-]?\s*([A-Za-z0-9\-_/]+)/i);
+  const invoiceNoInfo = parseIdFromLine(/(?:invoice\s*(?:reference|ref|number|num|no\.?|#)?)\s*[:\-]?\s*([A-Za-z0-9\-_/]+)/i);
+  const poNoInfo = parseIdFromLine(/(?:purchase order|po)\s*(?:reference|ref|number|num|no\.?|#)?\s*[:\-]?\s*([A-Za-z0-9\-_/]+)/i);
+  const contractNoInfo = parseIdFromLine(/(?:contract|agreement|msa)\s*(?:reference|ref|number|num|no\.?|#)?\s*[:\-]?\s*([A-Za-z0-9\-_/]+)/i);
+  const contractRefInfo = parseIdFromLine(/(?:contract\s*ref(?:erence)?|master agreement|msa\s*ref(?:erence)?)\s*[:\-]?\s*([A-Za-z0-9\-_/]+)/i);
 
   // Detect payment terms
   let detectedPaymentTerms: string | null = null;

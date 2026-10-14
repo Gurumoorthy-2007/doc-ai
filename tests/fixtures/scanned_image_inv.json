@@ -1,0 +1,17 @@
+{
+  "file_name": "scanned_image_inv.png",
+  "category": "invoice",
+  "expected_fields": {
+    "invoice_number": {
+      "value": "INV-SCAN-014"
+    },
+    "total": {
+      "value": "8500.00",
+      "numeric": 8500
+    }
+  },
+  "expected_line_items": [],
+  "expected_findings": [],
+  "scenario_description": "Simulated raster scanned invoice image testing non-PDF media ingest.",
+  "content_text": "TAX INVOICE\nScanned Optics Vendor Ltd\nInvoice Number: INV-SCAN-014\nDate: 2026-05-15\nTotal: $8,500.00"
+}

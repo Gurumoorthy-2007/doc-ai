@@ -1,0 +1,36 @@
+{
+  "file_name": "hardware_inv_02.pdf",
+  "category": "invoice",
+  "expected_fields": {
+    "invoice_number": {
+      "value": "INV-2026-013",
+      "verified": true
+    },
+    "total": {
+      "value": "590000.00",
+      "numeric": 590000,
+      "verified": true
+    },
+    "tax_amount": {
+      "value": "90000.00",
+      "numeric": 90000,
+      "verified": true
+    },
+    "supplier_name": {
+      "value": "Apex Hardware Solutions Pvt Ltd",
+      "verified": true
+    },
+    "po_reference": {
+      "value": "PO-IN-44090",
+      "verified": true
+    },
+    "currency": {
+      "value": "INR",
+      "verified": true
+    }
+  },
+  "expected_line_items": [],
+  "expected_findings": [],
+  "scenario_description": "Hardware invoice matching hardware_po_02 with 18% IGST calculation.",
+  "content_text": "TAX INVOICE\nApex Hardware Solutions Pvt Ltd\nInvoice Number: INV-2026-013\nInvoice Date: 2026-05-10\nPO Reference: PO-IN-44090\nBill To: Enterprise India Corp\nGSTIN: 27AAAAA0000A1Z5\nItem: High-Performance Rack Servers - Qty: 5 - Rate: 100,000.00 - Amount: 500,000.00\nSubtotal: INR 500,000.00\nTax (18% IGST): INR 90,000.00\nTotal Amount Due: INR 590,000.00\nCurrency: INR"
+}

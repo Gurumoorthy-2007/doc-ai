@@ -1,0 +1,23 @@
+{
+  "file_name": "unverified_passage_doc.pdf",
+  "category": "invoice",
+  "expected_fields": {
+    "invoice_number": {
+      "value": "INV-2026-011",
+      "verified": true
+    },
+    "total": {
+      "value": "45000.00",
+      "numeric": 45000,
+      "verified": true
+    },
+    "disputed_clause": {
+      "value": "Non-Existent Audit Exemption Clause",
+      "verified": false
+    }
+  },
+  "expected_line_items": [],
+  "expected_findings": [],
+  "scenario_description": "Document used to benchmark ungrounded passage verification failure.",
+  "content_text": "TAX INVOICE\nGhost Vendor Corporation\nInvoice Number: INV-2026-011\nDate: 2026-04-25\nBill To: Enterprise Client\nTotal Amount Due: $45,000.00"
+}

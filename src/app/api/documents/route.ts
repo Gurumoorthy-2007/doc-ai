@@ -5,6 +5,7 @@ import { extractDocumentWithEvidence } from '@/lib/ai/extraction';
 import { authenticateRequest } from '@/lib/server/auth';
 import { getGlobalRateLimiter, UPLOAD_LIMIT } from '@/lib/server/rateLimit';
 import { routeLowConfidenceFieldsToReview } from '@/lib/server/reviewRouting';
+import { classifyDocumentContent } from '@/lib/server/classification';
 import type { Document, DocumentCategory } from '@/lib/types';
 
 export async function GET(req: NextRequest) {
@@ -94,19 +95,31 @@ export async function POST(req: NextRequest) {
     // 1. Server-side validation of MIME, magic bytes, size, and page extraction
     const validated = await validateAndInspectFile(buffer, file.name, file.type);
 
-    // 2. Infer or assign category
-    const inferCategory = (name: string): DocumentCategory => {
-      const lower = name.toLowerCase();
-      if (lower.includes('inv') || lower.includes('bill')) return 'invoice';
-      if (lower.includes('po') || lower.includes('order')) return 'purchase_order';
-      if (lower.includes('contract') || lower.includes('agree') || lower.includes('msa') || lower.includes('sow')) return 'contract';
-      if (lower.includes('receipt')) return 'receipt';
-      if (lower.includes('statement')) return 'statement';
-      if (lower.includes('complian') || lower.includes('iso')) return 'compliance';
-      return 'invoice';
-    };
+    // 2. Content-based classification (No silent default to 'invoice')
+    let category: DocumentCategory;
+    let classificationReason: string | undefined;
+    let requiresConfirmation = false;
 
-    const category: DocumentCategory = categoryOverride || inferCategory(validated.fileName);
+    const validCategories: DocumentCategory[] = [
+      'contract',
+      'purchase_order',
+      'invoice',
+      'receipt',
+      'statement',
+      'compliance',
+      'other',
+    ];
+
+    if (categoryOverride && validCategories.includes(categoryOverride)) {
+      category = categoryOverride;
+      classificationReason = 'User explicitly confirmed category override';
+      requiresConfirmation = false;
+    } else {
+      const classification = classifyDocumentContent(validated.extractedText, validated.fileName);
+      category = classification.category;
+      classificationReason = classification.reason;
+      requiresConfirmation = classification.requiresConfirmation;
+    }
 
     // 3. Duplicate check by SHA-256 hash
     const existingDoc = await ServerPersistence.getDocumentByHash(validated.hash);
@@ -191,6 +204,11 @@ export async function POST(req: NextRequest) {
         success: true,
         data: {
           document: completedDoc,
+          classification: {
+            category,
+            reason: classificationReason,
+            requiresConfirmation,
+          },
           extraction: extraction.result,
           fields: extraction.fields,
           lineItems: extraction.lineItems,

@@ -1,0 +1,9 @@
+{
+  "file_name": "quarterly_report_doc.pdf",
+  "category": "other",
+  "expected_fields": {},
+  "expected_line_items": [],
+  "expected_findings": [],
+  "scenario_description": "Negative control report to verify classifier does NOT falsely tag as PO or Invoice.",
+  "content_text": "Q1 2026 FINANCIAL & OPERATIONAL REPORT\nPrepared for: Board of Directors\nExecutive Summary:\nRegional portfolio growth reached 14% year over year.\nTransport and logistics opportunities showed steady operational margin gains.\nNo procurement orders, vendor invoices, or commercial claims are contained within this report."
+}

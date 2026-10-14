@@ -1,0 +1,25 @@
+{
+  "file_name": "invoice_exceeds_contract.pdf",
+  "category": "invoice",
+  "expected_fields": {
+    "invoice_number": {
+      "value": "INV-2026-006",
+      "verified": true
+    },
+    "total": {
+      "value": "65000.00",
+      "numeric": 65000,
+      "verified": true
+    },
+    "supplier_name": {
+      "value": "Acme Global Solutions Pvt Ltd",
+      "verified": true
+    }
+  },
+  "expected_line_items": [],
+  "expected_findings": [
+    "RULE_INVOICE_EXCEEDS_CONTRACT"
+  ],
+  "scenario_description": "Invoice total of $65,000 exceeds contract spending cap of $50,000.",
+  "content_text": "TAX INVOICE\nAcme Global Solutions Pvt Ltd\nInvoice Number: INV-2026-006\nDate: 2026-05-01\nBill To: Globex Corporation\nItem: Enterprise Scale Transformation - Total: $65,000.00\nTotal Amount Due: $65,000.00\nCurrency: USD"
+}

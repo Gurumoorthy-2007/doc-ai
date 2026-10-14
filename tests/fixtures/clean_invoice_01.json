@@ -1,0 +1,48 @@
+{
+  "file_name": "clean_invoice_01.pdf",
+  "category": "invoice",
+  "expected_fields": {
+    "invoice_number": {
+      "value": "INV-2026-001",
+      "verified": true
+    },
+    "total": {
+      "value": "7080.00",
+      "numeric": 7080,
+      "verified": true
+    },
+    "subtotal": {
+      "value": "6000.00",
+      "numeric": 6000,
+      "verified": true
+    },
+    "tax_amount": {
+      "value": "1080.00",
+      "numeric": 1080,
+      "verified": true
+    },
+    "currency": {
+      "value": "USD",
+      "verified": true
+    },
+    "supplier_name": {
+      "value": "Acme Global Solutions Pvt Ltd",
+      "verified": true
+    },
+    "po_reference": {
+      "value": "PO-88001",
+      "verified": true
+    }
+  },
+  "expected_line_items": [
+    {
+      "description": "Cloud Architecture Consulting",
+      "quantity": 40,
+      "unit_price": 150,
+      "total": 6000
+    }
+  ],
+  "expected_findings": [],
+  "scenario_description": "Standard consulting tax invoice with valid subtotal and 18% GST calculation.",
+  "content_text": "TAX INVOICE\nAcme Global Solutions Pvt Ltd\nInvoice Number: INV-2026-001\nInvoice Date: 2026-03-15\nDue Date: 2026-04-14\nPO Reference: PO-88001\nBill To: Globex Corporation\nItem: Cloud Architecture Consulting - Qty: 40 - Price: 150.00 - Amount: 6,000.00\nSubtotal: $6,000.00\nTax (18% GST): $1,080.00\nTotal Amount Due: $7,080.00\nCurrency: USD\nPayment Terms: Net 30 Days"
+}

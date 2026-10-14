@@ -1,0 +1,25 @@
+{
+  "file_name": "payment_terms_conflict.pdf",
+  "category": "invoice",
+  "expected_fields": {
+    "invoice_number": {
+      "value": "INV-2026-016",
+      "verified": true
+    },
+    "total": {
+      "value": "30000.00",
+      "numeric": 30000,
+      "verified": true
+    },
+    "payment_terms": {
+      "value": "Net 7 Days",
+      "verified": true
+    }
+  },
+  "expected_line_items": [],
+  "expected_findings": [
+    "RULE_CONFLICTING_PAYMENT_TERMS"
+  ],
+  "scenario_description": "Invoice demanding payment in 7 days when contract specifies Net 45.",
+  "content_text": "TAX INVOICE\nAggressive Collections Corp\nInvoice Number: INV-2026-016\nInvoice Date: 2026-05-20\nBill To: Enterprise Client\nPayment Terms: Immediate / Net 7 Days\nTotal Amount Due: $30,000.00"
+}

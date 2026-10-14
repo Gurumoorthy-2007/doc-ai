@@ -1,0 +1,19 @@
+{
+  "file_name": "missing_mandatory_doc.pdf",
+  "category": "invoice",
+  "expected_fields": {
+    "invoice_number": {
+      "value": null
+    },
+    "total": {
+      "value": "18000.00",
+      "numeric": 18000
+    }
+  },
+  "expected_line_items": [],
+  "expected_findings": [
+    "RULE_MISSING_INVOICE_NUMBER"
+  ],
+  "scenario_description": "Invoice omitting mandatory invoice number and issuance date.",
+  "content_text": "COMMERCIAL INVOICE\nIncomplete Billing Corp\nBilled To: Globex Corp\nAmount Due: $18,000.00\nCurrency: USD"
+}

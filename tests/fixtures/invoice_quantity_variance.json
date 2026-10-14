@@ -1,0 +1,25 @@
+{
+  "file_name": "invoice_quantity_variance.pdf",
+  "category": "invoice",
+  "expected_fields": {
+    "invoice_number": {
+      "value": "INV-2026-005",
+      "verified": true
+    },
+    "total": {
+      "value": "12000.00",
+      "numeric": 12000,
+      "verified": true
+    },
+    "supplier_name": {
+      "value": "Gamma Logistics Services",
+      "verified": true
+    }
+  },
+  "expected_line_items": [],
+  "expected_findings": [
+    "RULE_LINE_ITEM_QTY_MISMATCH"
+  ],
+  "scenario_description": "Invoice billing for 120 units when purchase order authorized only 100.",
+  "content_text": "TAX INVOICE\nGamma Logistics Services\nInvoice Number: INV-2026-005\nDate: 2026-04-12\nPO Reference: PO-88005\nBill To: Globex Corp\nItem: Server Rack Delivery - Qty: 120 - Rate: 100.00 - Total: 12,000.00\nTotal Amount: $12,000.00\nCurrency: USD"
+}

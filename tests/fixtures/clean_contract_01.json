@@ -1,0 +1,27 @@
+{
+  "file_name": "clean_contract_01.pdf",
+  "category": "contract",
+  "expected_fields": {
+    "contract_id": {
+      "value": "MSA-2026-01",
+      "verified": true
+    },
+    "contract_value": {
+      "value": "50000.00",
+      "numeric": 50000,
+      "verified": true
+    },
+    "supplier_name": {
+      "value": "Acme Global Solutions Pvt Ltd",
+      "verified": true
+    },
+    "currency": {
+      "value": "USD",
+      "verified": true
+    }
+  },
+  "expected_line_items": [],
+  "expected_findings": [],
+  "scenario_description": "Master Services Agreement establishing $50,000 cap and Net 30 payment terms.",
+  "content_text": "MASTER SERVICES AGREEMENT\nContract Reference: MSA-2026-01\nThis Agreement is entered into on 2026-01-01 by and between Globex Corporation and Acme Global Solutions Pvt Ltd.\nContract Value Cap: $50,000.00\nCurrency: USD\nPayment Terms: Net 30 Days\nGoverning Law: State of California\nAuthorized Representative: Chief Legal Officer"
+}

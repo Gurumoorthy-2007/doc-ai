@@ -1,0 +1,30 @@
+{
+  "file_name": "duplicate_invoice_fmt_b.pdf",
+  "category": "invoice",
+  "expected_fields": {
+    "invoice_number": {
+      "value": "INV-2026-880",
+      "verified": true
+    },
+    "total": {
+      "value": "100000.00",
+      "numeric": 100000,
+      "verified": true
+    },
+    "currency": {
+      "value": "INR",
+      "verified": true
+    },
+    "supplier_name": {
+      "value": "Tech Mahindra Ltd",
+      "verified": true
+    }
+  },
+  "expected_line_items": [],
+  "expected_findings": [
+    "RULE_DUP_INVOICE_NUMBER",
+    "RULE_DUP_INVOICE_HEURISTIC"
+  ],
+  "scenario_description": "Identical invoice number, vendor, date, and amount formatted in modern billing layout.",
+  "content_text": "COMMERCIAL BILLING STATEMENT / TAX INVOICE\nVendor Name: Tech Mahindra Ltd\nDocument Reference: INV-2026-880\nBilling Date: 2026-04-01\nBilled To: Enterprise India Pvt Ltd\nGross Payable: INR 100000.00\nGSTIN: 27AABCT3518Q1ZV"
+}

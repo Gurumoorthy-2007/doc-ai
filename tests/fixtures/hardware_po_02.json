@@ -1,0 +1,27 @@
+{
+  "file_name": "hardware_po_02.pdf",
+  "category": "purchase_order",
+  "expected_fields": {
+    "po_number": {
+      "value": "PO-IN-44090",
+      "verified": true
+    },
+    "total": {
+      "value": "590000.00",
+      "numeric": 590000,
+      "verified": true
+    },
+    "supplier_name": {
+      "value": "Apex Hardware Solutions Pvt Ltd",
+      "verified": true
+    },
+    "currency": {
+      "value": "INR",
+      "verified": true
+    }
+  },
+  "expected_line_items": [],
+  "expected_findings": [],
+  "scenario_description": "Approved hardware procurement PO for server infrastructure.",
+  "content_text": "PURCHASE ORDER\nEnterprise India Corp Procurement\nPO Number: PO-IN-44090\nOrder Date: 2026-05-01\nVendor: Apex Hardware Solutions Pvt Ltd\nDeliver To: Data Center Alpha, Mumbai\nItem: High-Performance Rack Servers - Qty: 5 - Rate: 100,000.00 - Amount: 500,000.00\nSubtotal: INR 500,000.00\nGST (18%): INR 90,000.00\nTotal Committed: INR 590,000.00\nCurrency: INR"
+}

@@ -77,13 +77,14 @@ export default function DocumentUploadPage() {
   };
 
   const inferCategory = (fileName: string): DocumentCategory => {
-    const lower = fileName.toLowerCase();
-    if (lower.includes('inv') || lower.includes('bill')) return 'invoice';
-    if (lower.includes('po') || lower.includes('order')) return 'purchase_order';
-    if (lower.includes('contract') || lower.includes('agree') || lower.includes('msa') || lower.includes('sow')) return 'contract';
-    if (lower.includes('receipt')) return 'receipt';
-    if (lower.includes('statement') || lower.includes('sheet') || lower.includes('xls')) return 'statement';
-    if (lower.includes('complian') || lower.includes('iso')) return 'compliance';
+    const clean = fileName.trim().toLowerCase();
+    if (/(?:^|[\s_.\-])(?:purchase[-_]order|p\.o\.|po)(?:$|[\s_.\-0-9])/i.test(clean)) return 'purchase_order';
+    if (/(?:^|[\s_.\-])(?:inv|invoice|bill)(?:$|[\s_.\-0-9])/i.test(clean)) return 'invoice';
+    if (/(?:^|[\s_.\-])(?:contract|agreement|msa|sow|nda)(?:$|[\s_.\-0-9])/i.test(clean)) return 'contract';
+    if (/(?:^|[\s_.\-])(?:receipt)(?:$|[\s_.\-0-9])/i.test(clean)) return 'receipt';
+    if (/(?:^|[\s_.\-])(?:statement)(?:$|[\s_.\-0-9])/i.test(clean)) return 'statement';
+    if (/(?:^|[\s_.\-])(?:compliance|iso\d+|soc\d+)(?:$|[\s_.\-0-9])/i.test(clean)) return 'compliance';
+    if (/(?:^|[\s_.\-])(?:report|summary|presentation|proposal|notes)(?:$|[\s_.\-0-9])/i.test(clean)) return 'other';
     return selectedCategory;
   };
 
