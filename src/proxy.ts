@@ -56,8 +56,9 @@ export function proxy(request: NextRequest) {
   const hasAuthHeader = request.headers.has('authorization');
   const cookieHeader = request.headers.get('cookie') || '';
   const hasSupabaseCookie = /sb-[a-zA-Z0-9]+-auth-token/.test(cookieHeader);
+  const hasSessionCookie = /ds-auth-token=[^;]+/.test(cookieHeader);
 
-  const isAuthenticated = hasAuthHeader || hasSupabaseCookie;
+  const isAuthenticated = hasAuthHeader || hasSupabaseCookie || hasSessionCookie;
 
   if (!isAuthenticated) {
     // API routes → 401 JSON response

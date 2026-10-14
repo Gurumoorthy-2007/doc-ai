@@ -1,5 +1,6 @@
 import { NextRequest } from 'next/server';
 import { createServerSupabase } from '@/lib/supabase/server';
+import { verifySessionToken } from '@/lib/server/session';
 import type { Document, Finding, ReconciliationGroup } from '@/lib/types';
 
 export interface AuthenticatedUser {
@@ -102,15 +103,39 @@ export async function authenticateRequest(
     }
   }
 
-  // ── 2. Demo mode (non-production only) ─────────────────────────────
+  // ── 2. Check for signed session token in ds-auth-token cookie or Bearer header ──
+  const cookieHeader = req.headers.get('cookie') || '';
+  let sessionToken: string | null = null;
+  const dsCookieMatch = cookieHeader.match(/ds-auth-token=([^;]+)/);
+  if (dsCookieMatch) {
+    sessionToken = decodeURIComponent(dsCookieMatch[1]);
+  } else if (authHeader?.startsWith('Bearer ') && authHeader.includes('.')) {
+    sessionToken = authHeader.substring(7).trim();
+  }
+
+  if (sessionToken) {
+    const verified = verifySessionToken(sessionToken);
+    if (verified) {
+      return {
+        user: {
+          id: verified.id,
+          email: verified.email,
+          name: verified.name,
+          role: verified.role,
+        },
+      };
+    }
+  }
+
+  // ── 3. Demo mode (non-production only) ─────────────────────────────
   if (isDemoModeAllowed()) {
     return { user: DEFAULT_DEMO_USER };
   }
 
-  // ── 3. No valid auth source — reject ───────────────────────────────
+  // ── 4. No valid auth source — reject ───────────────────────────────
   return {
     user: null,
-    error: 'Unauthorized: No authentication provider configured. Set Supabase credentials or enable DEMO_MODE=true in a non-production environment.',
+    error: 'Unauthorized: Authentication required. Please sign in.',
     status: 401,
   };
 }

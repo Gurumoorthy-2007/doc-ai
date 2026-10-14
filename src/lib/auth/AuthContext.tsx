@@ -161,7 +161,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const signIn = async (email: string, password: string) => {
     if (!checkIsSupabaseConfigured()) {
-      // Demo authentication: allow login with demo credentials or any email/password
+      try {
+        const res = await fetch('/api/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, password }),
+        });
+        const data = await res.json();
+        if (!res.ok || !data.success) {
+          return { error: data.error || 'Login failed' };
+        }
+      } catch (err) {
+        console.warn('Login API error:', err);
+      }
+
       const demoUser: User = {
         ...DEFAULT_DEMO_USER,
         id: `usr-${Date.now()}`,
@@ -232,6 +245,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       try {
         localStorage.removeItem('ds_demo_user');
         localStorage.removeItem('ds_demo_profile');
+        await fetch('/api/auth/logout', { method: 'POST' });
       } catch {}
       return;
     }

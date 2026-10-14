@@ -47,7 +47,7 @@ export default function LoginPage() {
     if (authError) {
       setError(authError);
     } else {
-      router.push('/dashboard');
+      window.location.href = '/dashboard';
     }
   };
 

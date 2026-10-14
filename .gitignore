@@ -59,3 +59,5 @@ ehthumbs.db
 !.vscode/settings.json
 # Local data storage
 .data/
+
+.vercel
