@@ -20,6 +20,8 @@ export interface AuditEvent {
   entity_id: string;
   entity_title: string;
   details: string;
+  prev_hash?: string | null;
+  hash?: string;
   created_at: string;
 }
 

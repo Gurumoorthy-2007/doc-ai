@@ -315,6 +315,8 @@ create table if not exists public.audit_events (
   details jsonb default '{}',
   ip_address text,
   user_agent text,
+  prev_hash text,
+  hash text not null default '',
   created_at timestamptz not null default now()
 );
 
@@ -329,9 +331,22 @@ create policy "Users can view own audit events"
   on public.audit_events for select
   using (auth.uid() = user_id);
 
-create policy "Service role can manage audit events"
-  on public.audit_events for all
+create policy "Service role can insert audit events"
+  on public.audit_events for insert
   using (auth.role() = 'service_role');
+
+-- Enforce append-only immutability: block UPDATE and DELETE
+create or replace function public.prevent_audit_tampering()
+returns trigger as $$
+begin
+  raise exception 'audit_events is append-only and cannot be updated or deleted';
+end;
+$$ language plpgsql;
+
+drop trigger if exists trg_protect_audit_events on public.audit_events;
+create trigger trg_protect_audit_events
+  before update or delete on public.audit_events
+  for each row execute procedure public.prevent_audit_tampering();
 
 -- ============================================================
 -- 9. STORAGE BUCKET

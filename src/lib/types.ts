@@ -195,13 +195,18 @@ export interface ReviewComment {
 
 export interface AuditEvent {
   id: string;
-  user_id: string;
+  user_id?: string;
+  user_name?: string;
+  user_email?: string;
   action: string;
   entity_type: string;
   entity_id: string | null;
-  details: Record<string, unknown>;
-  ip_address: string | null;
-  user_agent: string | null;
+  entity_title?: string;
+  details: Record<string, unknown> | string;
+  ip_address?: string | null;
+  user_agent?: string | null;
+  prev_hash?: string | null;
+  hash?: string;
   created_at: string;
   // Joined
   user?: Profile;
@@ -311,6 +316,11 @@ export interface DashboardStats {
   total_financial_impact: number;
   active_vendors: number;
   recent_activity: AuditEvent[];
+  recentAuditEvents?: AuditEvent[];
+  recentFindings?: Finding[];
+  recentReconciliations?: ReconciliationGroup[];
+  pendingReview?: number;
+  flaggedVariance?: number;
   processing_trend: Array<{
     date: string;
     processed: number;

@@ -1,8 +1,10 @@
 'use client';
 
 // ============================================================
-// DocuSentinel AI — Client-Side Unified Data Store & Persistence
-// Handles offline/local caching + seamless Supabase sync
+// DocuSentinel AI — Client API Client & In-Memory Cache
+// The server is the single source of truth. All data is fetched
+// and mutated via /api/* routes; localStorage business data has
+// been completely removed.
 // ============================================================
 
 import type {
@@ -11,270 +13,165 @@ import type {
   LineItem,
   ReconciliationGroup,
   Finding,
-  FindingStatus,
-  FindingSeverity,
   DocumentCategory,
   DocumentStatus,
-  ReconciliationStatus,
+  DashboardStats,
 } from '../types';
-import {
-  INITIAL_DOCUMENTS,
-  INITIAL_EXTRACTED_FIELDS,
-  INITIAL_LINE_ITEMS,
-  INITIAL_RECONCILIATION_GROUPS,
-  INITIAL_FINDINGS,
-  INITIAL_AUDIT_EVENTS,
-  INITIAL_CASE_HISTORY,
-  type AuditEvent,
-  type CaseHistoryItem,
-} from './seedData';
+import type { AuditEvent, CaseHistoryItem } from './seedData';
+import type { ChainVerificationResult } from '../server/auditChain';
+
 export * from './seedData';
 
-// ------------------------------------------------------------
-// Local Storage Keys
-// ------------------------------------------------------------
-const STORAGE_KEYS = {
-  DOCUMENTS: 'ds_data_documents',
-  EXTRACTED_FIELDS: 'ds_data_extracted_fields',
-  LINE_ITEMS: 'ds_data_line_items',
-  RECONCILIATION_GROUPS: 'ds_data_reconciliation_groups',
-  FINDINGS: 'ds_data_findings',
-  AUDIT_EVENTS: 'ds_data_audit_events',
-  CASE_HISTORY: 'ds_data_case_history',
+// Legacy keys to clean up from earlier builds
+const LEGACY_STORAGE_KEYS = [
+  'ds_data_documents',
+  'ds_data_extracted_fields',
+  'ds_data_line_items',
+  'ds_data_reconciliation_groups',
+  'ds_data_findings',
+  'ds_data_audit_events',
+  'ds_data_case_history',
+];
+
+function clearLegacyLocalStorage(): void {
+  if (typeof window === 'undefined') return;
+  try {
+    for (const key of LEGACY_STORAGE_KEYS) {
+      localStorage.removeItem(key);
+    }
+  } catch {
+    // Ignore storage access errors
+  }
+}
+
+// Clean up legacy localStorage on module load
+if (typeof window !== 'undefined') {
+  clearLegacyLocalStorage();
+}
+
+interface MemoryCache {
+  documents: Document[];
+  extractedFields: ExtractedField[];
+  lineItems: LineItem[];
+  reconciliationGroups: ReconciliationGroup[];
+  findings: Finding[];
+  auditEvents: AuditEvent[];
+  caseHistory: CaseHistoryItem[];
+  dashboardStats: DashboardStats | null;
+}
+
+const memoryCache: MemoryCache = {
+  documents: [],
+  extractedFields: [],
+  lineItems: [],
+  reconciliationGroups: [],
+  findings: [],
+  auditEvents: [],
+  caseHistory: [],
+  dashboardStats: null,
 };
 
-// ------------------------------------------------------------
-// Store Helpers with Persistence
-// ------------------------------------------------------------
-
 export class DataStore {
-  private static get<T>(key: string, fallback: T): T {
-    if (typeof window === 'undefined') return fallback;
-    try {
-      const item = localStorage.getItem(key);
-      if (!item) {
-        localStorage.setItem(key, JSON.stringify(fallback));
-        return fallback;
-      }
-      return JSON.parse(item) as T;
-    } catch {
-      return fallback;
-    }
-  }
-
-  private static set<T>(key: string, value: T): void {
-    if (typeof window === 'undefined') return;
-    try {
-      localStorage.setItem(key, JSON.stringify(value));
-    } catch (e) {
-      console.error('Failed to save to localStorage:', e);
-    }
-  }
-
-  // Documents
+  // ── Synchronous getters (read from in-memory cache) ──────────────────
   static getDocuments(): Document[] {
-    return this.get<Document[]>(STORAGE_KEYS.DOCUMENTS, INITIAL_DOCUMENTS);
+    return memoryCache.documents;
   }
 
   static getDocumentById(id: string): Document | null {
-    return this.getDocuments().find((d) => d.id === id) ?? null;
+    return memoryCache.documents.find((d) => d.id === id) ?? null;
   }
 
+  static getExtractedFields(documentId?: string): ExtractedField[] {
+    if (!documentId) return memoryCache.extractedFields;
+    return memoryCache.extractedFields.filter((f) => f.document_id === documentId);
+  }
+
+  static getLineItems(documentId?: string): LineItem[] {
+    if (!documentId) return memoryCache.lineItems;
+    return memoryCache.lineItems.filter((li) => li.document_id === documentId);
+  }
+
+  static getReconciliationGroups(): ReconciliationGroup[] {
+    return memoryCache.reconciliationGroups;
+  }
+
+  static getReconciliationGroupById(id: string): ReconciliationGroup | null {
+    return memoryCache.reconciliationGroups.find((g) => g.id === id) ?? null;
+  }
+
+  static getFindings(): Finding[] {
+    return memoryCache.findings;
+  }
+
+  static getFindingById(id: string): Finding | null {
+    return memoryCache.findings.find((f) => f.id === id) ?? null;
+  }
+
+  static getAuditEvents(): AuditEvent[] {
+    return memoryCache.auditEvents;
+  }
+
+  static getCaseHistory(): CaseHistoryItem[] {
+    return memoryCache.caseHistory;
+  }
+
+  // ── Client In-Memory Updaters ────────────────────────────────────────
   static addDocument(doc: Document): Document {
-    const docs = this.getDocuments();
-    const updated = [doc, ...docs];
-    this.set(STORAGE_KEYS.DOCUMENTS, updated);
-
-    // Audit log
-    this.addAuditEvent({
-      user_name: 'Demo User',
-      user_email: 'demo@docusentinel.local',
-      action: 'Document Uploaded',
-      entity_type: 'document',
-      entity_id: doc.id,
-      entity_title: doc.file_name,
-      details: `Uploaded ${doc.category} document (${(doc.file_size / (1024 * 1024)).toFixed(1)} MB).`,
-    });
-
+    const existing = memoryCache.documents.findIndex((d) => d.id === doc.id);
+    if (existing >= 0) {
+      memoryCache.documents[existing] = doc;
+    } else {
+      memoryCache.documents.unshift(doc);
+    }
     return doc;
   }
 
   static updateDocumentStatus(id: string, status: DocumentStatus, error?: string): void {
-    const docs = this.getDocuments().map((d) =>
-      d.id === id
-        ? {
-            ...d,
-            status,
-            processing_error: error ?? null,
-            processing_completed_at: status === 'completed' ? new Date().toISOString() : d.processing_completed_at,
-            updated_at: new Date().toISOString(),
-          }
-        : d
-    );
-    this.set(STORAGE_KEYS.DOCUMENTS, docs);
+    const doc = memoryCache.documents.find((d) => d.id === id);
+    if (doc) {
+      doc.status = status;
+      doc.processing_error = error ?? null;
+      if (status === 'completed') doc.processing_completed_at = new Date().toISOString();
+      doc.updated_at = new Date().toISOString();
+    }
   }
 
   static deleteDocument(id: string): void {
-    const doc = this.getDocumentById(id);
-    const docs = this.getDocuments().filter((d) => d.id !== id);
-    this.set(STORAGE_KEYS.DOCUMENTS, docs);
+    memoryCache.documents = memoryCache.documents.filter((d) => d.id !== id);
+    memoryCache.extractedFields = memoryCache.extractedFields.filter((f) => f.document_id !== id);
+    memoryCache.lineItems = memoryCache.lineItems.filter((li) => li.document_id !== id);
+    memoryCache.findings = memoryCache.findings.filter(
+      (f) => f.source_document_id !== id && f.compared_document_id !== id
+    );
+  }
 
-    if (doc) {
-      this.addAuditEvent({
-        user_name: 'Demo User',
-        user_email: 'demo@docusentinel.local',
-        action: 'Document Deleted',
-        entity_type: 'document',
-        entity_id: doc.id,
-        entity_title: doc.file_name,
-        details: `Deleted document ${doc.file_name} from workspace.`,
-      });
+  static addExtractedFields(fields: ExtractedField[]): void {
+    const ids = new Set(fields.map((f) => f.id));
+    memoryCache.extractedFields = [
+      ...fields,
+      ...memoryCache.extractedFields.filter((f) => !ids.has(f.id)),
+    ];
+  }
+
+  static addLineItems(items: LineItem[]): void {
+    const ids = new Set(items.map((li) => li.id));
+    memoryCache.lineItems = [
+      ...items,
+      ...memoryCache.lineItems.filter((li) => !ids.has(li.id)),
+    ];
+  }
+
+  static addReconciliationGroup(group: ReconciliationGroup): ReconciliationGroup {
+    const existing = memoryCache.reconciliationGroups.findIndex((g) => g.id === group.id);
+    if (existing >= 0) {
+      memoryCache.reconciliationGroups[existing] = group;
+    } else {
+      memoryCache.reconciliationGroups.unshift(group);
     }
+    return group;
   }
 
-  // Extracted Fields & Line Items
-  static getExtractedFields(documentId?: string): ExtractedField[] {
-    const fields = this.get<ExtractedField[]>(STORAGE_KEYS.EXTRACTED_FIELDS, INITIAL_EXTRACTED_FIELDS);
-    return documentId ? fields.filter((f) => f.document_id === documentId) : fields;
-  }
-
-  static addExtractedFields(newFields: ExtractedField[]): void {
-    const existing = this.get<ExtractedField[]>(STORAGE_KEYS.EXTRACTED_FIELDS, INITIAL_EXTRACTED_FIELDS);
-    this.set(STORAGE_KEYS.EXTRACTED_FIELDS, [...newFields, ...existing]);
-  }
-
-  static getLineItems(documentId?: string): LineItem[] {
-    const items = this.get<LineItem[]>(STORAGE_KEYS.LINE_ITEMS, INITIAL_LINE_ITEMS);
-    return documentId ? items.filter((li) => li.document_id === documentId) : items;
-  }
-
-  static addLineItems(newItems: LineItem[]): void {
-    const existing = this.get<LineItem[]>(STORAGE_KEYS.LINE_ITEMS, INITIAL_LINE_ITEMS);
-    this.set(STORAGE_KEYS.LINE_ITEMS, [...newItems, ...existing]);
-  }
-
-  // Reconciliation Groups
-  static getReconciliationGroups(): ReconciliationGroup[] {
-    return this.get<ReconciliationGroup[]>(STORAGE_KEYS.RECONCILIATION_GROUPS, INITIAL_RECONCILIATION_GROUPS);
-  }
-
-  static getReconciliationGroupById(id: string): ReconciliationGroup | null {
-    return this.getReconciliationGroups().find((g) => g.id === id) ?? null;
-  }
-
-  static addReconciliationGroup(group: ReconciliationGroup): void {
-    const groups = this.getReconciliationGroups();
-    this.set(STORAGE_KEYS.RECONCILIATION_GROUPS, [group, ...groups]);
-  }
-
-  // Findings
-  static getFindings(): Finding[] {
-    return this.get<Finding[]>(STORAGE_KEYS.FINDINGS, INITIAL_FINDINGS);
-  }
-
-  static getFindingById(id: string): Finding | null {
-    return this.getFindings().find((f) => f.id === id) ?? null;
-  }
-
-  static updateFindingReview(
-    findingId: string,
-    decision: 'accepted' | 'rejected' | 'reviewing' | 'resolved',
-    comments: string,
-    userName: string = 'Demo Reviewer'
-  ): Finding | null {
-    const findings = this.getFindings();
-    let updatedFinding: Finding | null = null;
-
-    const newFindings = findings.map((f) => {
-      if (f.id === findingId) {
-        const nextStatus: FindingStatus =
-          decision === 'accepted'
-            ? 'accepted'
-            : decision === 'rejected'
-            ? 'rejected'
-            : decision === 'resolved'
-            ? 'resolved'
-            : 'in_review';
-
-        const history = f.decision_history ? [...f.decision_history] : [];
-        history.push({
-          decision,
-          comments: comments || 'No commentary provided',
-          reviewer: userName,
-          reviewed_by: userName,
-          timestamp: new Date().toISOString(),
-          reviewed_at: new Date().toISOString(),
-        });
-
-        updatedFinding = {
-          ...f,
-          status: nextStatus,
-          is_reviewed: decision !== 'reviewing',
-          reviewed_by: userName,
-          reviewed_at: new Date().toISOString(),
-          review_decision: decision,
-          review_comments: comments,
-          decision_history: history,
-          updated_at: new Date().toISOString(),
-        };
-        return updatedFinding;
-      }
-      return f;
-    });
-
-    this.set(STORAGE_KEYS.FINDINGS, newFindings);
-
-    if (updatedFinding) {
-      this.addAuditEvent({
-        user_name: userName,
-        user_email: 'demo@docusentinel.local',
-        action: 'Finding Reviewed',
-        entity_type: 'finding',
-        entity_id: findingId,
-        entity_title: (updatedFinding as Finding).title,
-        details: `Decision: ${decision.toUpperCase()}. Comment: ${comments || 'No comment provided'}. (Notice: Human-in-the-loop review only; does not authorize payment).`,
-      });
-    }
-
-    return updatedFinding;
-  }
-
-  // Audit Events
-  static getAuditEvents(): AuditEvent[] {
-    return this.get<AuditEvent[]>(STORAGE_KEYS.AUDIT_EVENTS, INITIAL_AUDIT_EVENTS);
-  }
-
-  static addAuditEvent(event: Omit<AuditEvent, 'id' | 'created_at'>): AuditEvent {
-    const newEvent: AuditEvent = {
-      ...event,
-      id: `aud-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
-      created_at: new Date().toISOString(),
-    };
-    const events = this.getAuditEvents();
-    this.set(STORAGE_KEYS.AUDIT_EVENTS, [newEvent, ...events]);
-    return newEvent;
-  }
-
-  // Case History
-  static getCaseHistory(): CaseHistoryItem[] {
-    return this.get<CaseHistoryItem[]>(STORAGE_KEYS.CASE_HISTORY, INITIAL_CASE_HISTORY);
-  }
-
-  // Reset to initial demo state
-  static resetDemoData(): void {
-    if (typeof window === 'undefined') return;
-    localStorage.setItem(STORAGE_KEYS.DOCUMENTS, JSON.stringify(INITIAL_DOCUMENTS));
-    localStorage.setItem(STORAGE_KEYS.EXTRACTED_FIELDS, JSON.stringify(INITIAL_EXTRACTED_FIELDS));
-    localStorage.setItem(STORAGE_KEYS.LINE_ITEMS, JSON.stringify(INITIAL_LINE_ITEMS));
-    localStorage.setItem(STORAGE_KEYS.RECONCILIATION_GROUPS, JSON.stringify(INITIAL_RECONCILIATION_GROUPS));
-    localStorage.setItem(STORAGE_KEYS.FINDINGS, JSON.stringify(INITIAL_FINDINGS));
-    localStorage.setItem(STORAGE_KEYS.AUDIT_EVENTS, JSON.stringify(INITIAL_AUDIT_EVENTS));
-    localStorage.setItem(STORAGE_KEYS.CASE_HISTORY, JSON.stringify(INITIAL_CASE_HISTORY));
-  }
-
-  // ============================================================
-  // Asynchronous API Layer (Communicates with /api endpoints)
-  // ============================================================
+  // ── Asynchronous Server API Operations (Server is Single Source of Truth) ──
 
   static async fetchDocuments(category?: string, status?: string, q?: string): Promise<Document[]> {
     try {
@@ -284,16 +181,17 @@ export class DataStore {
       if (q) params.set('q', q);
 
       const res = await fetch(`/api/documents?${params.toString()}`);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const json = await res.json();
-      if (json.success && Array.isArray(json.data)) {
-        this.set(STORAGE_KEYS.DOCUMENTS, json.data);
-        return json.data;
+      if (res.ok) {
+        const json = await res.json();
+        if (json.success && Array.isArray(json.data)) {
+          memoryCache.documents = json.data;
+          return json.data;
+        }
       }
-    } catch {
-      // Fall back to local cache
+    } catch (err) {
+      console.error('Failed to fetch documents from server:', err);
     }
-    return this.getDocuments();
+    return memoryCache.documents;
   }
 
   static async uploadDocument(
@@ -339,16 +237,20 @@ export class DataStore {
       if (res.ok) {
         const json = await res.json();
         if (json.success && json.data) {
-          return {
-            document: json.data.document,
-            fields: json.data.fields || [],
-            lineItems: json.data.lineItems || [],
-            findings: json.data.findings || [],
-          };
+          const doc = json.data.document;
+          const fields = json.data.fields || [];
+          const lineItems = json.data.lineItems || [];
+          const findings = json.data.findings || [];
+
+          if (doc) this.addDocument(doc);
+          if (fields.length > 0) this.addExtractedFields(fields);
+          if (lineItems.length > 0) this.addLineItems(lineItems);
+
+          return { document: doc, fields, lineItems, findings };
         }
       }
-    } catch {
-      // Fall back to local cache
+    } catch (err) {
+      console.error(`Failed to fetch document ${id} details:`, err);
     }
 
     const doc = this.getDocumentById(id);
@@ -369,42 +271,22 @@ export class DataStore {
     fields: ExtractedField[],
     lineItems: LineItem[]
   ): Promise<{ success: boolean; fields: ExtractedField[]; lineItems: LineItem[] }> {
-    try {
-      const res = await fetch(`/api/documents/${documentId}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ fields, lineItems }),
-      });
-      const data = await res.json();
-      if (res.ok && data.success && data.data) {
-        // Update local storage cache
-        const allFields = this.get<ExtractedField[]>(STORAGE_KEYS.EXTRACTED_FIELDS, INITIAL_EXTRACTED_FIELDS)
-          .filter((f) => f.document_id !== documentId);
-        this.set(STORAGE_KEYS.EXTRACTED_FIELDS, [...data.data.fields, ...allFields]);
-
-        const allItems = this.get<LineItem[]>(STORAGE_KEYS.LINE_ITEMS, INITIAL_LINE_ITEMS)
-          .filter((li) => li.document_id !== documentId);
-        this.set(STORAGE_KEYS.LINE_ITEMS, [...data.data.lineItems, ...allItems]);
-
-        return {
-          success: true,
-          fields: data.data.fields,
-          lineItems: data.data.lineItems,
-        };
-      }
-      throw new Error(data.error || 'Failed to update document data table');
-    } catch {
-      // Fallback local update
-      const allFields = this.get<ExtractedField[]>(STORAGE_KEYS.EXTRACTED_FIELDS, INITIAL_EXTRACTED_FIELDS)
-        .filter((f) => f.document_id !== documentId);
-      this.set(STORAGE_KEYS.EXTRACTED_FIELDS, [...fields, ...allFields]);
-
-      const allItems = this.get<LineItem[]>(STORAGE_KEYS.LINE_ITEMS, INITIAL_LINE_ITEMS)
-        .filter((li) => li.document_id !== documentId);
-      this.set(STORAGE_KEYS.LINE_ITEMS, [...lineItems, ...allItems]);
-
-      return { success: true, fields, lineItems };
+    const res = await fetch(`/api/documents/${documentId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fields, lineItems }),
+    });
+    const data = await res.json();
+    if (res.ok && data.success && data.data) {
+      this.addExtractedFields(data.data.fields);
+      this.addLineItems(data.data.lineItems);
+      return {
+        success: true,
+        fields: data.data.fields,
+        lineItems: data.data.lineItems,
+      };
     }
+    throw new Error(data.error || 'Failed to update document data table');
   }
 
   static async reprocessDocumentApi(id: string): Promise<Document | null> {
@@ -414,15 +296,14 @@ export class DataStore {
         const json = await res.json();
         if (json.success && json.data?.document) {
           const doc = json.data.document;
-          const currentDocs = this.getDocuments().map((d) => (d.id === id ? doc : d));
-          this.set(STORAGE_KEYS.DOCUMENTS, currentDocs);
+          this.addDocument(doc);
           if (json.data.fields) this.addExtractedFields(json.data.fields);
           if (json.data.lineItems) this.addLineItems(json.data.lineItems);
           return doc;
         }
       }
-    } catch {
-      // ignore
+    } catch (err) {
+      console.error(`Failed to reprocess document ${id}:`, err);
     }
     return this.getDocumentById(id);
   }
@@ -430,8 +311,8 @@ export class DataStore {
   static async deleteDocumentApi(id: string): Promise<void> {
     try {
       await fetch(`/api/documents/${id}`, { method: 'DELETE' });
-    } catch {
-      // ignore
+    } catch (err) {
+      console.error(`Failed to delete document ${id}:`, err);
     }
     this.deleteDocument(id);
   }
@@ -447,14 +328,14 @@ export class DataStore {
       if (res.ok) {
         const json = await res.json();
         if (json.success && Array.isArray(json.data)) {
-          this.set(STORAGE_KEYS.FINDINGS, json.data);
+          memoryCache.findings = json.data;
           return json.data;
         }
       }
-    } catch {
-      // Fall back
+    } catch (err) {
+      console.error('Failed to fetch findings:', err);
     }
-    return this.getFindings();
+    return memoryCache.findings;
   }
 
   static async fetchFindingDetails(id: string): Promise<{
@@ -476,8 +357,8 @@ export class DataStore {
           };
         }
       }
-    } catch {
-      // Fall back
+    } catch (err) {
+      console.error(`Failed to fetch finding ${id}:`, err);
     }
 
     const finding = this.getFindingById(id);
@@ -512,16 +393,17 @@ export class DataStore {
       if (res.ok) {
         const json = await res.json();
         if (json.success && json.data) {
-          // Update cache
-          const list = this.getFindings().map((f) => (f.id === findingId ? json.data : f));
-          this.set(STORAGE_KEYS.FINDINGS, list);
-          return json.data;
+          const updated = json.data as Finding;
+          memoryCache.findings = memoryCache.findings.map((f) =>
+            f.id === findingId ? updated : f
+          );
+          return updated;
         }
       }
-    } catch {
-      // Fall back
+    } catch (err) {
+      console.error(`Failed to save review for finding ${findingId}:`, err);
     }
-    return this.updateFindingReview(findingId, decision, comments, reviewerName);
+    return null;
   }
 
   static async fetchReconciliations(): Promise<ReconciliationGroup[]> {
@@ -530,14 +412,14 @@ export class DataStore {
       if (res.ok) {
         const json = await res.json();
         if (json.success && Array.isArray(json.data)) {
-          this.set(STORAGE_KEYS.RECONCILIATION_GROUPS, json.data);
+          memoryCache.reconciliationGroups = json.data;
           return json.data;
         }
       }
-    } catch {
-      // Fall back
+    } catch (err) {
+      console.error('Failed to fetch reconciliations:', err);
     }
-    return this.getReconciliationGroups();
+    return memoryCache.reconciliationGroups;
   }
 
   static async runReconciliationApi(params?: {
@@ -561,8 +443,11 @@ export class DataStore {
       this.addReconciliationGroup(json.data.group);
     }
     if (json.data?.findings && json.data.findings.length > 0) {
-      const currentFindings = this.getFindings();
-      this.set(STORAGE_KEYS.FINDINGS, [...json.data.findings, ...currentFindings]);
+      const newIds = new Set(json.data.findings.map((f: Finding) => f.id));
+      memoryCache.findings = [
+        ...json.data.findings,
+        ...memoryCache.findings.filter((f) => !newIds.has(f.id)),
+      ];
     }
 
     return {
@@ -571,19 +456,20 @@ export class DataStore {
     };
   }
 
-  static async fetchDashboardStats(): Promise<any> {
+  static async fetchDashboardStats(): Promise<DashboardStats | null> {
     try {
       const res = await fetch('/api/dashboard/stats');
       if (res.ok) {
         const json = await res.json();
         if (json.success && json.data) {
+          memoryCache.dashboardStats = json.data;
           return json.data;
         }
       }
-    } catch {
-      // ignore
+    } catch (err) {
+      console.error('Failed to fetch dashboard stats:', err);
     }
-    return null;
+    return memoryCache.dashboardStats;
   }
 
   static async fetchAuditTrail(): Promise<{ auditEvents: AuditEvent[]; caseHistory: CaseHistoryItem[] }> {
@@ -592,26 +478,53 @@ export class DataStore {
       if (res.ok) {
         const json = await res.json();
         if (json.success && json.data) {
-          if (json.data.auditEvents) this.set(STORAGE_KEYS.AUDIT_EVENTS, json.data.auditEvents);
-          if (json.data.caseHistory) this.set(STORAGE_KEYS.CASE_HISTORY, json.data.caseHistory);
+          if (Array.isArray(json.data.auditEvents)) memoryCache.auditEvents = json.data.auditEvents;
+          if (Array.isArray(json.data.caseHistory)) memoryCache.caseHistory = json.data.caseHistory;
           return json.data;
         }
       }
-    } catch {
-      // ignore
+    } catch (err) {
+      console.error('Failed to fetch audit trail:', err);
     }
     return {
-      auditEvents: this.getAuditEvents(),
-      caseHistory: this.getCaseHistory(),
+      auditEvents: memoryCache.auditEvents,
+      caseHistory: memoryCache.caseHistory,
     };
+  }
+
+  static async verifyAuditChainApi(): Promise<ChainVerificationResult> {
+    try {
+      const res = await fetch('/api/audit-trail/verify');
+      if (res.ok) {
+        const json = await res.json();
+        if (json.success && json.data) {
+          return json.data;
+        }
+      }
+    } catch (err) {
+      console.error('Failed to verify audit chain:', err);
+    }
+    return { verified: false, count: 0, error: 'Verification network error' };
   }
 
   static async resetDemoDataApi(): Promise<void> {
     try {
       await fetch('/api/demo/reset', { method: 'POST' });
-    } catch {
-      // ignore
+    } catch (err) {
+      console.error('Failed to reset demo data on server:', err);
     }
     this.resetDemoData();
+  }
+
+  static resetDemoData(): void {
+    clearLegacyLocalStorage();
+    memoryCache.documents = [];
+    memoryCache.extractedFields = [];
+    memoryCache.lineItems = [];
+    memoryCache.reconciliationGroups = [];
+    memoryCache.findings = [];
+    memoryCache.auditEvents = [];
+    memoryCache.caseHistory = [];
+    memoryCache.dashboardStats = null;
   }
 }

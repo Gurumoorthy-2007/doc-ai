@@ -19,6 +19,8 @@ import {
   FileText,
   AlertTriangle,
   GitCompareArrows,
+  CheckCircle,
+  RefreshCw,
 } from 'lucide-react';
 import { format } from 'date-fns';
 
@@ -28,6 +30,27 @@ export default function AuditTrailPage() {
   const [auditEvents, setAuditEvents] = useState<AuditEvent[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [filterAction, setFilterAction] = useState('all');
+  const [chainStatus, setChainStatus] = useState<{
+    verified: boolean;
+    count: number;
+    loading: boolean;
+    error?: string;
+  }>({ verified: false, count: 0, loading: true });
+
+  const verifyChain = async () => {
+    setChainStatus((prev) => ({ ...prev, loading: true }));
+    try {
+      const res = await DataStore.verifyAuditChainApi();
+      setChainStatus({
+        verified: res.verified,
+        count: res.count,
+        loading: false,
+        error: res.error,
+      });
+    } catch {
+      setChainStatus({ verified: false, count: 0, loading: false, error: 'Verification error' });
+    }
+  };
 
   useEffect(() => {
     setCaseHistory(DataStore.getCaseHistory());
@@ -41,6 +64,8 @@ export default function AuditTrailPage() {
         }
       })
       .catch((err) => console.error('Failed to fetch audit trail:', err));
+
+    verifyChain();
   }, []);
 
   const filteredCases = caseHistory.filter(
@@ -59,7 +84,7 @@ export default function AuditTrailPage() {
   });
 
   const handleExportAudit = () => {
-    const headers = ['Event ID', 'Timestamp', 'User', 'Action', 'Entity Type', 'Entity Title', 'Details'];
+    const headers = ['Event ID', 'Timestamp', 'User', 'Action', 'Entity Type', 'Entity Title', 'Details', 'Hash', 'Prev Hash'];
     const rows = filteredAuditEvents.map((ev) => [
       ev.id,
       ev.created_at,
@@ -68,6 +93,8 @@ export default function AuditTrailPage() {
       ev.entity_type,
       `"${ev.entity_title.replace(/"/g, '""')}"`,
       `"${ev.details.replace(/"/g, '""')}"`,
+      ev.hash || '',
+      ev.prev_hash || '',
     ]);
 
     const csvContent = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...rows.map((r) => r.join(','))].join('\n');
@@ -113,7 +140,7 @@ export default function AuditTrailPage() {
         </div>
       </div>
 
-      {/* Security & Immutability Badge */}
+      {/* Security & Immutability Badge with Cryptographic Chain Verification */}
       <div
         style={{
           background: 'var(--ds-surface)',
@@ -145,16 +172,42 @@ export default function AuditTrailPage() {
           </div>
           <div>
             <div style={{ fontWeight: 600, fontSize: '0.88rem', color: 'var(--ds-text-primary)' }}>
-              Immutable Compliance Audit Trail
+              Immutable Compliance Audit Trail (SHA-256 Hash Chained)
             </div>
             <div style={{ fontSize: '0.75rem', color: 'var(--ds-text-muted)' }}>
-              Events are write-only and tamper-evident. Ordinary users cannot edit or delete audit logs.
+              Events are append-only with continuous cryptographic linking.
+              {chainStatus.error && ` Warning: ${chainStatus.error}`}
             </div>
           </div>
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span className="badge badge-success">Tamper-Proof</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+          {chainStatus.loading ? (
+            <span className="badge badge-info" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+              <RefreshCw size={12} className="animate-spin" />
+              <span>Verifying Chain...</span>
+            </span>
+          ) : chainStatus.verified ? (
+            <span className="badge badge-success" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+              <CheckCircle size={13} />
+              <span>Chain Verified ({chainStatus.count} events)</span>
+            </span>
+          ) : (
+            <span className="badge badge-error" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+              <AlertTriangle size={13} />
+              <span>Tamper Detected</span>
+            </span>
+          )}
+
+          <button
+            onClick={verifyChain}
+            className="btn btn-secondary"
+            style={{ padding: '5px 12px', fontSize: '0.78rem' }}
+            title="Re-verify cryptographic SHA-256 hash chain"
+          >
+            <RefreshCw size={12} />
+            <span>Re-verify</span>
+          </button>
           <span className="badge badge-info">SOC2 / ISO 27001 Ready</span>
         </div>
       </div>
