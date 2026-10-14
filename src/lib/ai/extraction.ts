@@ -14,6 +14,11 @@ import type {
   EnhancedExtractionOutput,
 } from '../types';
 import { isNvidiaConfigured, extractWithNvidia } from './nvidia';
+import {
+  locatePassageInPages,
+  estimateBoundingBoxFromText,
+  normalizeModelCoordinates,
+} from '../server/boundingBox';
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 
@@ -24,7 +29,7 @@ export type { EnhancedExtractionOutput };
 // Extracts real fields from actual document text when Gemini is offline
 // ============================================================
 
-function extractFromTextRegex(
+export function extractFromTextRegex(
   text: string,
   category: DocumentCategory,
   docId: string,
@@ -32,16 +37,20 @@ function extractFromTextRegex(
 ): EnhancedExtractionOutput {
   const lines = text.split('\n').map((l) => l.trim()).filter((l) => l.length > 0);
 
-  // Helper to find which page a passage is on
-  const findPageForText = (snippet: string): number => {
-    if (!snippet) return 1;
-    const lower = snippet.toLowerCase();
-    for (let i = 0; i < pageTexts.length; i++) {
-      if (pageTexts[i].toLowerCase().includes(lower)) {
-        return i + 1;
-      }
+  // Helper to find which page a passage is on and verify ground-truth presence
+  const findPageForText = (snippet: string | null | undefined): { page: number | null; verified: boolean } => {
+    if (!snippet || snippet.trim().length === 0) {
+      return { page: null, verified: false };
     }
-    return 1;
+    const loc = locatePassageInPages(snippet, pageTexts);
+    if (loc.found && loc.page !== null) {
+      return { page: loc.page, verified: true };
+    }
+    if (text.toLowerCase().includes(snippet.toLowerCase().trim())) {
+      return { page: 1, verified: true };
+    }
+    // Cannot be found in document text — do NOT default to page 1
+    return { page: null, verified: false };
   };
 
   // Find supplier / vendor from text header
@@ -192,6 +201,11 @@ function extractFromTextRegex(
       const qty = parseInt(itemMatch[2], 10);
       const price = parseFloat(itemMatch[3].replace(/,/g, ''));
       const amt = parseFloat(itemMatch[4].replace(/,/g, ''));
+      const loc = findPageForText(line);
+      const bBox = loc.verified && loc.page !== null
+        ? estimateBoundingBoxFromText(loc.page, pageTexts[loc.page - 1] || text, 0, line.length)
+        : null;
+
       extractedLineItems.push({
         id: `li-${docId}-${itemCounter}`,
         document_id: docId,
@@ -201,7 +215,9 @@ function extractFromTextRegex(
         unit_price: isNaN(price) ? null : price,
         amount: isNaN(amt) ? null : amt,
         unit: 'pcs',
-        source_page: findPageForText(line),
+        source_page: loc.page,
+        verified: loc.verified,
+        bounding_box: bBox,
         created_at: new Date().toISOString(),
       });
       itemCounter++;
@@ -217,18 +233,27 @@ function extractFromTextRegex(
     sourceText: string | null
   ) => {
     const isMissing = val === null || val === '';
-    const srcPage = sourceText ? findPageForText(sourceText) : null;
+    const loc = findPageForText(sourceText);
+    const verified = isMissing ? true : loc.verified;
+    const confidence = isMissing ? 0 : verified ? 0.95 : 0.40;
+    const srcPage = verified ? loc.page : null;
+    const bBox = verified && sourceText && srcPage !== null
+      ? estimateBoundingBoxFromText(srcPage, pageTexts[srcPage - 1] || text, loc.page ? 0 : 0, sourceText.length)
+      : null;
+
     fields.push({
       id: `fld-${docId}-${name}`,
       document_id: docId,
       field_name: name,
       field_value: isMissing ? null : String(val),
       field_type: type,
-      confidence: isMissing ? 0 : 0.95,
+      confidence,
       is_missing: isMissing,
-      is_ambiguous: false,
+      is_ambiguous: !isMissing && (!verified || confidence < 0.8),
       source_text: sourceText,
       source_page: srcPage,
+      verified,
+      bounding_box: bBox,
       created_at: new Date().toISOString(),
     });
   };
@@ -489,19 +514,35 @@ function transformGeminiResponse(
 
   for (const [key, fieldObj] of Object.entries(rawFields)) {
     const val = fieldObj?.value !== undefined && fieldObj?.value !== null ? String(fieldObj.value) : null;
-    const isMissing = val === null;
-    const srcText = typeof fieldObj?.source_passage === 'string' ? fieldObj.source_passage : null;
-    let pageNum = typeof fieldObj?.source_page === 'number' ? fieldObj.source_page : 1;
+    const isMissing = val === null || val === '';
+    const srcText = typeof fieldObj?.source_passage === 'string' && fieldObj.source_passage.trim().length > 0
+      ? fieldObj.source_passage.trim()
+      : null;
 
-    // Verify source text page if possible
-    if (srcText && pageTexts.length > 0) {
-      for (let i = 0; i < pageTexts.length; i++) {
-        if (pageTexts[i].toLowerCase().includes(srcText.toLowerCase())) {
-          pageNum = i + 1;
-          break;
+    let verified = false;
+    let pageNum: number | null = null;
+
+    if (!isMissing) {
+      if (srcText) {
+        const loc = locatePassageInPages(srcText, pageTexts);
+        if (loc.found && loc.page !== null) {
+          verified = true;
+          pageNum = loc.page;
+        } else if (pageTexts.some((p) => p.toLowerCase().includes(srcText.toLowerCase()))) {
+          verified = true;
+          pageNum = typeof fieldObj?.source_page === 'number' && fieldObj.source_page > 0 ? fieldObj.source_page : 1;
         }
       }
     }
+
+    const rawConf = typeof fieldObj?.confidence === 'number' ? fieldObj.confidence : isMissing ? 0 : 0.95;
+    const confidence = isMissing ? 0 : verified ? rawConf : Math.min(rawConf * 0.5, 0.45);
+    const isAmbiguous = !isMissing && (!verified || confidence < 0.8);
+
+    const bBox = normalizeModelCoordinates(fieldObj?.bounding_box, pageNum || 1) ||
+      (verified && srcText && pageNum !== null
+        ? estimateBoundingBoxFromText(pageNum, pageTexts[pageNum - 1] || '', 0, srcText.length)
+        : null);
 
     fields.push({
       id: `fld-${docId}-${key}`,
@@ -509,27 +550,39 @@ function transformGeminiResponse(
       field_name: key,
       field_value: val,
       field_type: typeof fieldObj?.value === 'number' ? 'number' : 'string',
-      confidence: typeof fieldObj?.confidence === 'number' ? fieldObj.confidence : isMissing ? 0 : 0.95,
+      confidence,
       is_missing: isMissing,
-      is_ambiguous: false,
+      is_ambiguous: isAmbiguous,
       source_text: srcText,
-      source_page: isMissing ? null : pageNum,
+      source_page: pageNum,
+      verified,
+      bounding_box: bBox,
       created_at: new Date().toISOString(),
     });
   }
 
   let counter = 1;
   for (const item of rawLineItems) {
+    const desc = typeof item.description === 'string' ? item.description : `Item ${counter}`;
+    const pageLoc = locatePassageInPages(desc, pageTexts);
+    const linePage = pageLoc.found && pageLoc.page !== null ? pageLoc.page : (typeof item.source_page === 'number' ? item.source_page : null);
+    const lineVerified = pageLoc.found;
+    const lineBBox = lineVerified && linePage !== null
+      ? estimateBoundingBoxFromText(linePage, pageTexts[linePage - 1] || '', 0, desc.length)
+      : null;
+
     lineItems.push({
       id: `li-${docId}-${counter}`,
       document_id: docId,
       item_number: counter,
-      description: typeof item.description === 'string' ? item.description : `Item ${counter}`,
+      description: desc,
       quantity: typeof item.quantity === 'number' ? item.quantity : null,
       unit_price: typeof item.unit_price === 'number' ? item.unit_price : null,
       amount: typeof item.amount === 'number' ? item.amount : null,
       unit: typeof item.unit === 'string' ? item.unit : 'pcs',
-      source_page: typeof item.source_page === 'number' ? item.source_page : 1,
+      source_page: linePage,
+      verified: lineVerified,
+      bounding_box: lineBBox,
       created_at: new Date().toISOString(),
     });
     counter++;

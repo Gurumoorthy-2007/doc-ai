@@ -15,6 +15,11 @@ import type {
   InvoiceExtraction,
   EnhancedExtractionOutput,
 } from '@/lib/types';
+import {
+  locatePassageInPages,
+  estimateBoundingBoxFromText,
+  normalizeModelCoordinates,
+} from '@/lib/server/boundingBox';
 
 // Configuration defaults
 export const DEFAULT_NVIDIA_BASE_URL = 'https://integrate.api.nvidia.com/v1';
@@ -150,6 +155,7 @@ export interface RawExtractionJsonSchema {
       source_page?: number | null;
       confidence?: number;
       is_missing?: boolean;
+      bounding_box?: unknown;
     }
   >;
   line_items?: Array<{
@@ -159,6 +165,7 @@ export interface RawExtractionJsonSchema {
     amount?: number | null;
     unit?: string | null;
     source_page?: number | null;
+    bounding_box?: unknown;
   }>;
   obligations?: string[];
   missing_fields?: string[];
@@ -246,28 +253,37 @@ function transformNvidiaExtraction(
   const fields: ExtractedField[] = [];
   const lineItems: LineItem[] = [];
 
-  const resolvePage = (passage: string | null | undefined, reportedPage: number | null | undefined): number | null => {
-    if (!passage) return null;
-    if (pageTexts.length > 0) {
-      const lower = passage.toLowerCase().trim();
-      for (let i = 0; i < pageTexts.length; i++) {
-        if (pageTexts[i].toLowerCase().includes(lower)) {
-          return i + 1;
-        }
-      }
-    }
-    return typeof reportedPage === 'number' && reportedPage > 0 ? reportedPage : 1;
-  };
-
   for (const [key, fieldObj] of Object.entries(rawFields)) {
     const val = fieldObj?.value !== undefined && fieldObj?.value !== null ? String(fieldObj.value) : null;
     const isMissing = fieldObj?.is_missing ?? (val === null || val === '');
     const srcText = typeof fieldObj?.source_passage === 'string' && fieldObj.source_passage.trim().length > 0
       ? fieldObj.source_passage.trim()
       : null;
-    const srcPage = isMissing ? null : resolvePage(srcText, fieldObj?.source_page);
-    const conf = typeof fieldObj?.confidence === 'number' ? fieldObj.confidence : isMissing ? 0 : 0.95;
-    const isAmbiguous = !isMissing && conf < 0.7;
+
+    let verified = false;
+    let srcPage: number | null = null;
+
+    if (!isMissing) {
+      if (srcText) {
+        const loc = locatePassageInPages(srcText, pageTexts);
+        if (loc.found && loc.page !== null) {
+          verified = true;
+          srcPage = loc.page;
+        } else if (pageTexts.some((p) => p.toLowerCase().includes(srcText.toLowerCase()))) {
+          verified = true;
+          srcPage = typeof fieldObj?.source_page === 'number' && fieldObj.source_page > 0 ? fieldObj.source_page : 1;
+        }
+      }
+    }
+
+    const rawConf = typeof fieldObj?.confidence === 'number' ? fieldObj.confidence : isMissing ? 0 : 0.95;
+    const conf = isMissing ? 0 : verified ? rawConf : Math.min(rawConf * 0.5, 0.45);
+    const isAmbiguous = !isMissing && (!verified || conf < 0.8);
+
+    const bBox = normalizeModelCoordinates(fieldObj?.bounding_box, srcPage || 1) ||
+      (verified && srcText && srcPage !== null
+        ? estimateBoundingBoxFromText(srcPage, pageTexts[srcPage - 1] || '', 0, srcText.length)
+        : null);
 
     fields.push({
       id: `fld-${docId}-${key}`,
@@ -280,6 +296,8 @@ function transformNvidiaExtraction(
       is_ambiguous: isAmbiguous,
       source_text: srcText,
       source_page: srcPage,
+      verified,
+      bounding_box: bBox,
       created_at: new Date().toISOString(),
     });
   }
@@ -289,17 +307,27 @@ function transformNvidiaExtraction(
     const amountVal = typeof item.amount === 'number' ? item.amount : null;
     const qtyVal = typeof item.quantity === 'number' ? item.quantity : null;
     const priceVal = typeof item.unit_price === 'number' ? item.unit_price : null;
+    const desc = typeof item.description === 'string' ? item.description : `Item ${itemCounter}`;
+
+    const pageLoc = locatePassageInPages(desc, pageTexts);
+    const linePage = pageLoc.found && pageLoc.page !== null ? pageLoc.page : (typeof item.source_page === 'number' && item.source_page > 0 ? item.source_page : null);
+    const lineVerified = pageLoc.found;
+    const lineBBox = lineVerified && linePage !== null
+      ? estimateBoundingBoxFromText(linePage, pageTexts[linePage - 1] || '', 0, desc.length)
+      : null;
 
     lineItems.push({
       id: `li-${docId}-${itemCounter}`,
       document_id: docId,
       item_number: itemCounter,
-      description: typeof item.description === 'string' ? item.description : `Item ${itemCounter}`,
+      description: desc,
       quantity: qtyVal,
       unit_price: priceVal,
       amount: amountVal,
       unit: typeof item.unit === 'string' ? item.unit : 'pcs',
-      source_page: typeof item.source_page === 'number' ? item.source_page : 1,
+      source_page: linePage,
+      verified: lineVerified,
+      bounding_box: lineBBox,
       created_at: new Date().toISOString(),
     });
     itemCounter++;

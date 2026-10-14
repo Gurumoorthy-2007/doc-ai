@@ -4,6 +4,7 @@ import { validateAndInspectFile, saveFileToStorage, deleteFileFromStorage } from
 import { extractDocumentWithEvidence } from '@/lib/ai/extraction';
 import { authenticateRequest } from '@/lib/server/auth';
 import { getGlobalRateLimiter, UPLOAD_LIMIT } from '@/lib/server/rateLimit';
+import { routeLowConfidenceFieldsToReview } from '@/lib/server/reviewRouting';
 import type { Document, DocumentCategory } from '@/lib/types';
 
 export async function GET(req: NextRequest) {
@@ -171,6 +172,9 @@ export async function POST(req: NextRequest) {
         status: 'completed',
         processing_completed_at: new Date().toISOString(),
       });
+
+      // Route low confidence or unverified fields to the human review queue
+      await routeLowConfidenceFieldsToReview(completedDoc, extraction.fields);
 
       // Audit event with verified user identity
       await ServerPersistence.addAuditEvent({

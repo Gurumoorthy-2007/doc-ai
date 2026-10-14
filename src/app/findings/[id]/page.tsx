@@ -48,14 +48,21 @@ function EvidenceViewerContent({ params }: { params: Promise<{ id: string }> }) 
   const [sourceDoc, setSourceDoc] = useState<Document | null>(null);
   const [comparedDoc, setComparedDoc] = useState<Document | null>(null);
   const [sourceFields, setSourceFields] = useState<ExtractedField[]>([]);
+  const [comparedFields, setComparedFields] = useState<ExtractedField[]>([]);
   const [docText, setDocText] = useState<string>('');
+  const [comparedDocText, setComparedDocText] = useState<string>('');
   const [isLoadingText, setIsLoadingText] = useState<boolean>(false);
+  const [isLoadingComparedText, setIsLoadingComparedText] = useState<boolean>(false);
   const [isLoadingEvidence, setIsLoadingEvidence] = useState<boolean>(true);
 
   const [activeTab, setActiveTab] = useState<'evidence' | 'details'>('evidence');
+  const [viewMode, setViewMode] = useState<'dual' | 'source' | 'compared'>('dual');
   const [zoomLevel, setZoomLevel] = useState(100);
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
+  const [comparedZoomLevel, setComparedZoomLevel] = useState(100);
+  const [comparedCurrentPage, setComparedCurrentPage] = useState(1);
+  const [comparedTotalPages, setComparedTotalPages] = useState(1);
   const [showReviewModal, setShowReviewModal] = useState(false);
   const [reviewDecision, setReviewDecision] = useState<'accepted' | 'rejected' | 'reviewing'>('accepted');
   const [reviewComment, setReviewComment] = useState('');
@@ -78,12 +85,19 @@ function EvidenceViewerContent({ params }: { params: Promise<{ id: string }> }) 
           setFinding(data.finding);
           setSourceDoc(data.sourceDocument);
           setComparedDoc(data.comparedDocument);
-          setSourceFields(data.sourceFields);
+          setSourceFields(data.sourceFields || []);
+          setComparedFields(data.comparedFields || []);
           if (data.finding.source_page) {
             setCurrentPage(data.finding.source_page);
           }
           if (data.sourceDocument?.page_count) {
             setTotalPages(Math.max(1, data.sourceDocument.page_count));
+          }
+          if (data.finding.compared_page) {
+            setComparedCurrentPage(data.finding.compared_page);
+          }
+          if (data.comparedDocument?.page_count) {
+            setComparedTotalPages(Math.max(1, data.comparedDocument.page_count));
           }
           if (data.finding.review_decision) {
             setReviewDecision(data.finding.review_decision);
@@ -92,7 +106,7 @@ function EvidenceViewerContent({ params }: { params: Promise<{ id: string }> }) 
             setReviewComment(data.finding.review_comments);
           }
 
-          // Fetch real document text for evidence highlighting
+          // Fetch source document text for evidence highlighting
           if (data.sourceDocument?.id) {
             setIsLoadingText(true);
             fetch(`/api/documents/${data.sourceDocument.id}/file?text=true`)
@@ -109,6 +123,26 @@ function EvidenceViewerContent({ params }: { params: Promise<{ id: string }> }) 
               .catch(() => {})
               .finally(() => {
                 if (isMounted) setIsLoadingText(false);
+              });
+          }
+
+          // Fetch compared document text for dual-sided evidence highlighting
+          if (data.comparedDocument?.id) {
+            setIsLoadingComparedText(true);
+            fetch(`/api/documents/${data.comparedDocument.id}/file?text=true`)
+              .then((res) => (res.ok ? res.json() : null))
+              .then((textData) => {
+                if (!isMounted) return;
+                if (textData?.data?.text) {
+                  setComparedDocText(textData.data.text);
+                  if (textData.data.pageCount) {
+                    setComparedTotalPages(Math.max(1, textData.data.pageCount));
+                  }
+                }
+              })
+              .catch(() => {})
+              .finally(() => {
+                if (isMounted) setIsLoadingComparedText(false);
               });
           }
         }
@@ -170,162 +204,600 @@ function EvidenceViewerContent({ params }: { params: Promise<{ id: string }> }) 
     }
   };
 
-  // Helper to highlight exact source passage in real document text
-  const renderHighlightedDocumentText = () => {
-    if (isLoadingText) {
-      return (
-        <div style={{ padding: '40px 20px', textAlign: 'center', color: 'var(--ds-text-secondary)' }}>
-          <FileSearch size={24} style={{ margin: '0 auto 8px', animation: 'spin 2s linear infinite' }} />
-          <div>Retrieving stored document plain text stream...</div>
-        </div>
-      );
-    }
-
-    if (!docText) {
-      return (
-        <div style={{ padding: '30px 20px', textAlign: 'center', color: 'var(--ds-text-secondary)' }}>
-          <AlertTriangle size={24} style={{ margin: '0 auto 8px', color: 'var(--ds-warning)' }} />
-          <div style={{ fontWeight: 600, marginBottom: 4 }}>Extracted Plain Text Not Available</div>
-          <p style={{ fontSize: '0.82rem', maxWidth: 460, margin: '0 auto' }}>
-            {sourceDoc
-              ? `Document ${sourceDoc.file_name} does not have cached plain-text extracted or is a binary format. You can download and inspect the original file directly.`
-              : 'The source document for this finding is unlinked or was generated in an earlier session.'}
-          </p>
-          {sourceDoc && (
-            <a
-              href={`/api/documents/${sourceDoc.id}/file`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="btn btn-secondary"
-              style={{ marginTop: 14 }}
-            >
-              <Download size={14} />
-              <span>Download Original {sourceDoc.file_name}</span>
-            </a>
-          )}
-        </div>
-      );
-    }
-
-    const passage = finding?.source_text?.trim();
-
-    if (!passage) {
-      return (
-        <pre
-          style={{
-            whiteSpace: 'pre-wrap',
-            wordBreak: 'break-word',
-            fontFamily: 'monospace',
-            fontSize: '0.82rem',
-            lineHeight: 1.6,
-            margin: 0,
-            color: 'var(--ds-text-primary)',
-          }}
-        >
-          {docText}
-        </pre>
-      );
-    }
-
-    // Try finding exact or normalized match
-    const lowerText = docText.toLowerCase();
-    const lowerPassage = passage.toLowerCase();
-    const matchIndex = lowerText.indexOf(lowerPassage);
-
-    if (matchIndex === -1) {
-      return (
-        <div>
-          <div
-            style={{
-              padding: '10px 14px',
-              borderRadius: 'var(--ds-radius)',
-              background: 'var(--ds-warning-bg)',
-              border: '1px solid rgba(245, 158, 11, 0.3)',
-              marginBottom: 16,
-              fontSize: '0.8rem',
-              color: 'var(--ds-warning)',
-              display: 'flex',
-              alignItems: 'flex-start',
-              gap: 8,
-            }}
-          >
-            <AlertTriangle size={16} style={{ flexShrink: 0, marginTop: 2 }} />
-            <div>
-              <strong>Passage Alignment Note:</strong> The exact passage &ldquo;{passage}&rdquo; was parsed by the document intelligence engine from Page {finding?.source_page || 1}, but could not be strictly aligned character-for-character in the raw text stream. Raw document content shown below without synthetic highlights.
-            </div>
-          </div>
-          <pre
-            style={{
-              whiteSpace: 'pre-wrap',
-              wordBreak: 'break-word',
-              fontFamily: 'monospace',
-              fontSize: '0.82rem',
-              lineHeight: 1.6,
-              margin: 0,
-              color: 'var(--ds-text-primary)',
-            }}
-          >
-            {docText}
-          </pre>
-        </div>
-      );
-    }
-
-    const before = docText.slice(0, matchIndex);
-    const matched = docText.slice(matchIndex, matchIndex + passage.length);
-    const after = docText.slice(matchIndex + passage.length);
+  // Modular Document Evidence Canvas with text highlighting & 2D bounding box overlay
+  const renderDocumentEvidenceCanvas = ({
+    side,
+    doc,
+    text,
+    isLoading,
+    page,
+    totalPages: docTotalPages,
+    setPage,
+    zoom,
+    setZoom,
+    fieldName,
+    value,
+    passage,
+    verified,
+    boundingBox,
+  }: {
+    side: 'source' | 'compared';
+    doc: Document | null;
+    text: string;
+    isLoading: boolean;
+    page: number;
+    totalPages: number;
+    setPage: React.Dispatch<React.SetStateAction<number>>;
+    zoom: number;
+    setZoom: React.Dispatch<React.SetStateAction<number>>;
+    fieldName?: string | null;
+    value?: string | null;
+    passage?: string | null;
+    verified?: boolean;
+    boundingBox?: import('@/lib/types').BoundingBox | null;
+  }) => {
+    const isSource = side === 'source';
+    const accentColor = isSource ? 'var(--ds-error)' : 'var(--ds-teal-500)';
+    const accentBg = isSource ? '#fee2e2' : '#ccfbf1';
+    const accentBorder = isSource ? '#ef4444' : '#0d9488';
 
     return (
-      <div>
+      <div className="card" style={{ padding: 20 }}>
+        {/* Document Header Controls */}
         <div
           style={{
-            padding: '8px 12px',
-            borderRadius: 'var(--ds-radius)',
-            background: 'var(--ds-success-bg)',
-            border: '1px solid rgba(16, 185, 129, 0.3)',
-            marginBottom: 14,
-            fontSize: '0.78rem',
-            color: 'var(--ds-success)',
             display: 'flex',
             alignItems: 'center',
-            gap: 6,
+            justifyContent: 'space-between',
+            paddingBottom: 12,
+            borderBottom: '1px solid var(--ds-border-light)',
+            marginBottom: 16,
+            flexWrap: 'wrap',
+            gap: 10,
           }}
         >
-          <CheckCircle size={14} />
-          <span>Verified passage located and highlighted at exact text coordinate below.</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+            <FileText size={18} color={accentColor} />
+            <span style={{ fontWeight: 600, fontSize: '0.85rem' }}>
+              {doc?.file_name || (isSource ? 'Source Document' : 'Comparison Document')}
+            </span>
+            <span className={`badge ${isSource ? 'badge-error' : 'badge-teal'}`}>
+              {doc?.category?.replace(/_/g, ' ').toUpperCase() || (isSource ? 'SOURCE' : 'BASELINE')}
+            </span>
+
+            {/* Interactive Page Navigation Controls */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginLeft: 6 }}>
+              <button
+                type="button"
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                disabled={page <= 1}
+                className="icon-btn"
+                title="Previous Page"
+                style={{ padding: '3px 6px', height: 28, opacity: page <= 1 ? 0.4 : 1 }}
+              >
+                <ChevronLeft size={15} />
+              </button>
+              <span className="badge badge-info" style={{ fontSize: '0.75rem' }}>
+                Page {page} of {docTotalPages}
+              </span>
+              <button
+                type="button"
+                onClick={() => setPage((p) => Math.min(docTotalPages, p + 1))}
+                disabled={page >= docTotalPages}
+                className="icon-btn"
+                title="Next Page"
+                style={{ padding: '3px 6px', height: 28, opacity: page >= docTotalPages ? 0.4 : 1 }}
+              >
+                <ChevronRight size={15} />
+              </button>
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            {doc && (
+              <a
+                href={`/api/documents/${doc.id}/file`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="icon-btn"
+                title={`Download/Open Raw ${doc.file_name}`}
+                style={{ textDecoration: 'none', color: 'inherit', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+              >
+                <Download size={16} />
+              </a>
+            )}
+            <button
+              type="button"
+              onClick={() => setZoom((z) => Math.max(70, z - 10))}
+              className="icon-btn"
+              title="Zoom Out"
+            >
+              <ZoomOut size={16} />
+            </button>
+            <span style={{ fontSize: '0.78rem', color: 'var(--ds-text-secondary)', minWidth: 42, textAlign: 'center' }}>
+              {zoom}%
+            </span>
+            <button
+              type="button"
+              onClick={() => setZoom((z) => Math.min(140, z + 10))}
+              className="icon-btn"
+              title="Zoom In"
+            >
+              <ZoomIn size={16} />
+            </button>
+          </div>
         </div>
-        <pre
+
+        {/* Evidence Grounding & Verification Metadata Box */}
+        <div
           style={{
-            whiteSpace: 'pre-wrap',
-            wordBreak: 'break-word',
-            fontFamily: 'monospace',
-            fontSize: '0.82rem',
-            lineHeight: 1.6,
-            margin: 0,
-            color: 'var(--ds-text-primary)',
+            background: 'var(--ds-bg)',
+            border: '1px solid var(--ds-border)',
+            borderRadius: 'var(--ds-radius)',
+            padding: '12px 16px',
+            marginBottom: 16,
           }}
         >
-          {before}
-          <mark
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, flexWrap: 'wrap', gap: 8 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <Quote size={15} color={accentColor} />
+              <span style={{ fontWeight: 600, fontSize: '0.82rem', color: 'var(--ds-text-primary)' }}>
+                {isSource ? 'Flagged Source Passage' : 'Baseline Reference Passage'}
+              </span>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+              <span className="badge">Field: {fieldName || 'Value'}</span>
+              {value && <span className="badge badge-info">Value: {value}</span>}
+              {verified === false ? (
+                <span className="badge badge-warning" style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                  <AlertTriangle size={11} />
+                  <span>Unverified Grounding</span>
+                </span>
+              ) : (
+                <span className="badge badge-success" style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                  <CheckCircle size={11} />
+                  <span>Verified Grounded</span>
+                </span>
+              )}
+              {boundingBox && (
+                <span
+                  className="badge"
+                  title={`Bounding box on page ${boundingBox.page}: x=${Math.round(boundingBox.x * 100)}%, y=${Math.round(boundingBox.y * 100)}%, w=${Math.round(boundingBox.width * 100)}%, h=${Math.round(boundingBox.height * 100)}%`}
+                  style={{ fontFamily: 'monospace', fontSize: '0.7rem' }}
+                >
+                  Box: P{boundingBox.page} [{Math.round(boundingBox.x * 100)}%, {Math.round(boundingBox.y * 100)}%]
+                </span>
+              )}
+            </div>
+          </div>
+          <div
             style={{
-              background: '#fee2e2',
-              color: '#991b1b',
-              border: '2px solid #ef4444',
-              borderRadius: 4,
-              padding: '2px 6px',
-              fontWeight: 700,
-              boxShadow: '0 0 8px rgba(239, 68, 68, 0.4)',
-              display: 'inline-block',
+              background: 'white',
+              padding: '10px 14px',
+              borderRadius: 'var(--ds-radius-sm)',
+              borderLeft: `3px solid ${accentBorder}`,
+              fontFamily: 'monospace',
+              fontSize: '0.82rem',
+              color: 'var(--ds-text-primary)',
+              wordBreak: 'break-word',
+              boxShadow: 'var(--ds-shadow-sm)',
             }}
-            title={`Verified Flagged Field: ${finding?.source_field || 'Value'}`}
           >
-            {matched}
-          </mark>
-          {after}
-        </pre>
+            &ldquo;{passage || value || 'Direct computation / tabular extraction'}&rdquo;
+          </div>
+        </div>
+
+        {/* Document Canvas with Text Highlighting and 2D Bounding Box Overlay */}
+        <div
+          style={{
+            position: 'relative',
+            background: '#fafafa',
+            border: '1px solid var(--ds-border)',
+            borderRadius: 'var(--ds-radius)',
+            padding: '24px 28px',
+            minHeight: 460,
+            maxHeight: 640,
+            overflowY: 'auto',
+            transform: `scale(${zoom / 100})`,
+            transformOrigin: 'top center',
+            transition: 'transform 0.2s ease',
+          }}
+        >
+          {/* Visual 2D Bounding Box Highlight Overlay */}
+          {boundingBox && (boundingBox.page === page || boundingBox.page === 1) && (
+            <div
+              style={{
+                position: 'absolute',
+                left: `${Math.max(2, Math.min(90, boundingBox.x * 100))}%`,
+                top: `${Math.max(2, Math.min(85, boundingBox.y * 100))}%`,
+                width: `${Math.max(8, Math.min(95, boundingBox.width * 100))}%`,
+                height: `${Math.max(3, Math.min(30, boundingBox.height * 100))}%`,
+                border: `2px solid ${accentBorder}`,
+                backgroundColor: isSource ? 'rgba(239, 68, 68, 0.12)' : 'rgba(13, 148, 136, 0.12)',
+                boxShadow: isSource ? '0 0 10px rgba(239, 68, 68, 0.35)' : '0 0 10px rgba(13, 148, 136, 0.35)',
+                borderRadius: 4,
+                pointerEvents: 'none',
+                zIndex: 10,
+                transition: 'all 0.3s ease',
+              }}
+            >
+              <span
+                style={{
+                  position: 'absolute',
+                  top: -18,
+                  left: 0,
+                  fontSize: '0.65rem',
+                  fontWeight: 700,
+                  color: isSource ? '#ef4444' : '#0d9488',
+                  background: accentBg,
+                  border: `1px solid ${accentBorder}`,
+                  padding: '1px 5px',
+                  borderRadius: 3,
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                {isSource ? 'FLAGGED REGION' : 'BASELINE REGION'}: {fieldName || 'FIELD'}
+              </span>
+            </div>
+          )}
+
+          {/* Render Text Stream */}
+          {isLoading ? (
+            <div style={{ padding: '40px 20px', textAlign: 'center', color: 'var(--ds-text-secondary)' }}>
+              <FileSearch size={24} style={{ margin: '0 auto 8px', animation: 'spin 2s linear infinite' }} />
+              <div>Retrieving stored document plain text stream...</div>
+            </div>
+          ) : !text ? (
+            <div style={{ padding: '30px 20px', textAlign: 'center', color: 'var(--ds-text-secondary)' }}>
+              <AlertTriangle size={24} style={{ margin: '0 auto 8px', color: 'var(--ds-warning)' }} />
+              <div style={{ fontWeight: 600, marginBottom: 4 }}>Extracted Plain Text Not Available</div>
+              <p style={{ fontSize: '0.82rem', maxWidth: 460, margin: '0 auto' }}>
+                {doc
+                  ? `Document ${doc.file_name} does not have cached plain-text extracted or is a binary format. You can download and inspect the original file directly.`
+                  : 'Document text stream is unavailable.'}
+              </p>
+              {doc && (
+                <a
+                  href={`/api/documents/${doc.id}/file`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="btn btn-secondary"
+                  style={{ marginTop: 14 }}
+                >
+                  <Download size={14} />
+                  <span>Download Original {doc.file_name}</span>
+                </a>
+              )}
+            </div>
+          ) : (() => {
+            const trimmedPassage = passage?.trim();
+            if (!trimmedPassage) {
+              return (
+                <pre
+                  style={{
+                    whiteSpace: 'pre-wrap',
+                    wordBreak: 'break-word',
+                    fontFamily: 'monospace',
+                    fontSize: '0.82rem',
+                    lineHeight: 1.6,
+                    margin: 0,
+                    color: 'var(--ds-text-primary)',
+                  }}
+                >
+                  {text}
+                </pre>
+              );
+            }
+
+            const lowerText = text.toLowerCase();
+            const lowerPassage = trimmedPassage.toLowerCase();
+            const matchIndex = lowerText.indexOf(lowerPassage);
+
+            if (matchIndex === -1) {
+              return (
+                <div>
+                  <div
+                    style={{
+                      padding: '10px 14px',
+                      borderRadius: 'var(--ds-radius)',
+                      background: 'var(--ds-warning-bg)',
+                      border: '1px solid rgba(245, 158, 11, 0.3)',
+                      marginBottom: 16,
+                      fontSize: '0.8rem',
+                      color: 'var(--ds-warning)',
+                      display: 'flex',
+                      alignItems: 'flex-start',
+                      gap: 8,
+                    }}
+                  >
+                    <AlertTriangle size={16} style={{ flexShrink: 0, marginTop: 2 }} />
+                    <div>
+                      <strong>Passage Alignment Note:</strong> The exact passage &ldquo;{trimmedPassage}&rdquo; was parsed by the document intelligence engine from Page {page || 1}, but could not be strictly aligned character-for-character in the raw text stream. Raw document content shown below.
+                    </div>
+                  </div>
+                  <pre
+                    style={{
+                      whiteSpace: 'pre-wrap',
+                      wordBreak: 'break-word',
+                      fontFamily: 'monospace',
+                      fontSize: '0.82rem',
+                      lineHeight: 1.6,
+                      margin: 0,
+                      color: 'var(--ds-text-primary)',
+                    }}
+                  >
+                    {text}
+                  </pre>
+                </div>
+              );
+            }
+
+            const before = text.slice(0, matchIndex);
+            const matched = text.slice(matchIndex, matchIndex + trimmedPassage.length);
+            const after = text.slice(matchIndex + trimmedPassage.length);
+
+            return (
+              <div>
+                <div
+                  style={{
+                    padding: '8px 12px',
+                    borderRadius: 'var(--ds-radius)',
+                    background: 'var(--ds-success-bg)',
+                    border: '1px solid rgba(16, 185, 129, 0.3)',
+                    marginBottom: 14,
+                    fontSize: '0.78rem',
+                    color: 'var(--ds-success)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 6,
+                  }}
+                >
+                  <CheckCircle size={14} />
+                  <span>Verified passage located and highlighted at exact text coordinate below.</span>
+                </div>
+                <pre
+                  style={{
+                    whiteSpace: 'pre-wrap',
+                    wordBreak: 'break-word',
+                    fontFamily: 'monospace',
+                    fontSize: '0.82rem',
+                    lineHeight: 1.6,
+                    margin: 0,
+                    color: 'var(--ds-text-primary)',
+                  }}
+                >
+                  {before}
+                  <mark
+                    style={{
+                      background: accentBg,
+                      color: isSource ? '#991b1b' : '#115e59',
+                      border: `2px solid ${accentBorder}`,
+                      borderRadius: 4,
+                      padding: '2px 6px',
+                      fontWeight: 700,
+                      boxShadow: isSource ? '0 0 8px rgba(239, 68, 68, 0.4)' : '0 0 8px rgba(13, 148, 136, 0.4)',
+                      display: 'inline-block',
+                    }}
+                    title={`${isSource ? 'Flagged' : 'Baseline'} Field: ${fieldName || 'Value'}`}
+                  >
+                    {matched}
+                  </mark>
+                  {after}
+                </pre>
+              </div>
+            );
+          })()}
+        </div>
       </div>
     );
   };
+
+  // Reusable Evidence Cross-Reference Card
+  const renderEvidenceCrossReferenceCard = () => (
+    <div className="card" style={{ padding: 20 }}>
+      <h3 style={{ fontSize: '0.95rem', fontWeight: 600, marginBottom: 14 }}>
+        Evidence Grounding
+      </h3>
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <div>
+          <span style={{ fontSize: '0.75rem', color: 'var(--ds-text-muted)' }}>Flagged Field:</span>
+          <div style={{ fontWeight: 600, fontSize: '0.95rem', color: 'var(--ds-text-primary)' }}>
+            {finding?.source_field || 'Value / Obligation'}
+          </div>
+        </div>
+
+        <div>
+          <span style={{ fontSize: '0.75rem', color: 'var(--ds-text-muted)' }}>Observed Value:</span>
+          <div style={{ fontWeight: 700, fontSize: '1.1rem', color: 'var(--ds-error)' }}>
+            {finding?.source_value ? `₹ ${parseFloat(finding.source_value).toLocaleString('en-IN')}` : 'N/A'}
+          </div>
+        </div>
+
+        <div>
+          <span style={{ fontSize: '0.75rem', color: 'var(--ds-text-muted)' }}>Related Comparison:</span>
+          <div style={{ fontSize: '0.85rem', color: 'var(--ds-text-secondary)', marginTop: 4 }}>
+            {comparedDoc?.file_name || 'Comparison Document'} • Expected: <strong>
+              {finding?.compared_value ? `₹ ${parseFloat(finding.compared_value).toLocaleString('en-IN')}` : 'N/A'}
+            </strong>
+          </div>
+        </div>
+
+        <div>
+          <span style={{ fontSize: '0.75rem', color: 'var(--ds-text-muted)' }}>Engine Reason:</span>
+          <p style={{ fontSize: '0.82rem', color: 'var(--ds-text-secondary)', margin: '4px 0 0 0', lineHeight: 1.5 }}>
+            {finding?.reason}
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+
+  // Reusable AI Explanation Card
+  const renderAiExplanationCard = () => (
+    <div className="card" style={{ padding: 20, border: '1px solid rgba(13, 148, 136, 0.25)' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <Sparkles size={16} color="var(--ds-teal-500)" />
+          <h3 style={{ fontSize: '0.95rem', fontWeight: 600, margin: 0 }}>
+            AI Root Cause Analysis
+          </h3>
+        </div>
+        <button
+          type="button"
+          onClick={handleFetchAiExplanation}
+          disabled={isLoadingAi}
+          className="btn btn-secondary"
+          style={{ padding: '3px 8px', fontSize: '0.72rem' }}
+          title="Generate or Refresh AI Explanation"
+        >
+          {isLoadingAi ? (
+            <RefreshCw size={12} className="spin" />
+          ) : (
+            <RefreshCw size={12} />
+          )}
+          <span>{aiExplanation ? 'Refresh' : 'Analyze'}</span>
+        </button>
+      </div>
+
+      {aiExplanation ? (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10, fontSize: '0.82rem' }}>
+          <div>
+            <span style={{ fontSize: '0.75rem', color: 'var(--ds-text-muted)' }}>Root Cause:</span>
+            <p style={{ margin: '2px 0 0 0', color: 'var(--ds-text-primary)', lineHeight: 1.4 }}>
+              {aiExplanation.rootCause}
+            </p>
+          </div>
+          <div>
+            <span style={{ fontSize: '0.75rem', color: 'var(--ds-text-muted)' }}>Recommended Action:</span>
+            <p style={{ margin: '2px 0 0 0', color: 'var(--ds-text-secondary)', lineHeight: 1.4 }}>
+              {aiExplanation.recommendedAction}
+            </p>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 4, paddingTop: 8, borderTop: '1px solid var(--ds-border-light)' }}>
+            <span style={{ fontSize: '0.72rem', color: 'var(--ds-text-muted)' }}>
+              Confidence: {(aiExplanation.confidence * 100).toFixed(0)}% • {aiExplanation.modelUsed}
+            </span>
+            <span className="badge badge-info" style={{ fontSize: '0.7rem' }}>
+              AI Generated
+            </span>
+          </div>
+        </div>
+      ) : (
+        <div style={{ textAlign: 'center', padding: '16px 8px', color: 'var(--ds-text-muted)', fontSize: '0.82rem' }}>
+          <p style={{ margin: '0 0 10px 0' }}>
+            Generate an AI root cause diagnosis and recommended auditor action based on cross-document evidence.
+          </p>
+          <button
+            type="button"
+            onClick={handleFetchAiExplanation}
+            disabled={isLoadingAi}
+            className="btn btn-secondary"
+            style={{ fontSize: '0.78rem', margin: '0 auto' }}
+          >
+            <Sparkles size={14} color="var(--ds-teal-500)" />
+            <span>{isLoadingAi ? 'Analyzing Evidence...' : 'Generate AI Diagnosis'}</span>
+          </button>
+        </div>
+      )}
+
+      {aiError && (
+        <div style={{ fontSize: '0.75rem', color: 'var(--ds-error)', marginTop: 8 }}>
+          {aiError}
+        </div>
+      )}
+    </div>
+  );
+
+  // Reusable Human Review Decision Card
+  const renderReviewDecisionCard = () => (
+    <div className="card" style={{ padding: 20 }}>
+      <h3 style={{ fontSize: '0.95rem', fontWeight: 600, marginBottom: 14 }}>
+        Review Decision Actions
+      </h3>
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 6 }}>
+          <button
+            type="button"
+            onClick={() => setReviewDecision('accepted')}
+            className={`btn ${reviewDecision === 'accepted' ? 'btn-primary' : 'btn-secondary'}`}
+            style={{ fontSize: '0.75rem', padding: '8px 4px', justifyContent: 'center' }}
+          >
+            <CheckCircle size={13} />
+            <span>Confirm</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setReviewDecision('rejected')}
+            className={`btn ${reviewDecision === 'rejected' ? 'btn-primary' : 'btn-secondary'}`}
+            style={{ fontSize: '0.75rem', padding: '8px 4px', justifyContent: 'center' }}
+          >
+            <XCircle size={13} />
+            <span>Dismiss</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setReviewDecision('reviewing')}
+            className={`btn ${reviewDecision === 'reviewing' ? 'btn-primary' : 'btn-secondary'}`}
+            style={{ fontSize: '0.75rem', padding: '8px 4px', justifyContent: 'center' }}
+          >
+            <HelpCircle size={13} />
+            <span>Investigate</span>
+          </button>
+        </div>
+
+        <textarea
+          className="form-input"
+          rows={2}
+          placeholder="Reviewer justification or notes..."
+          value={reviewComment}
+          onChange={(e) => setReviewComment(e.target.value)}
+          style={{ fontSize: '0.8rem', resize: 'vertical' }}
+        />
+
+        <button
+          type="button"
+          onClick={handleSaveReview}
+          disabled={isSavingReview}
+          className="btn btn-primary"
+          style={{ width: '100%', justifyContent: 'center' }}
+        >
+          {isSavingReview ? (
+            <>
+              <RefreshCw size={14} className="spin" />
+              <span>Saving...</span>
+            </>
+          ) : (
+            <>
+              <Check size={14} />
+              <span>Save Decision</span>
+            </>
+          )}
+        </button>
+      </div>
+
+      <div
+        style={{
+          marginTop: 14,
+          padding: '8px 10px',
+          borderRadius: 'var(--ds-radius)',
+          background: 'var(--ds-info-bg)',
+          border: '1px solid rgba(59, 130, 246, 0.2)',
+          fontSize: '0.74rem',
+          color: 'var(--ds-info)',
+          display: 'flex',
+          alignItems: 'flex-start',
+          gap: 8,
+        }}
+      >
+        <Shield size={14} style={{ flexShrink: 0, marginTop: 1 }} />
+        <span>
+          All human decisions are permanently recorded in the immutable audit log.
+        </span>
+      </div>
+    </div>
+  );
 
   if (isLoadingEvidence) {
     return (
@@ -526,347 +998,172 @@ function EvidenceViewerContent({ params }: { params: Promise<{ id: string }> }) 
         </button>
       </div>
 
-      {/* Tab 1: Evidence Split View */}
+      {/* Tab 1: Evidence Split / Dual Comparison View */}
       {activeTab === 'evidence' && (
-        <div className="evidence-split-layout">
-          {/* Left: Original Document Viewer */}
-          <div className="card" style={{ padding: 20 }}>
-            {/* Verified Source Passage Callout Box */}
-            <div
-              style={{
-                background: 'var(--ds-bg)',
-                border: '1px solid var(--ds-border)',
-                borderRadius: 'var(--ds-radius)',
-                padding: '14px 18px',
-                marginBottom: 16,
-              }}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, flexWrap: 'wrap', gap: 8 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <Quote size={16} color="var(--ds-teal-500)" />
-                  <span style={{ fontWeight: 600, fontSize: '0.82rem', color: 'var(--ds-text-primary)' }}>
-                    Verified Source Passage
-                  </span>
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <span className="badge badge-info">Page {finding.source_page || currentPage}</span>
-                  <span className="badge">Field: {finding.source_field || 'Obligation'}</span>
-                </div>
-              </div>
-              <div
-                style={{
-                  background: 'white',
-                  padding: '10px 14px',
-                  borderRadius: 'var(--ds-radius-sm)',
-                  borderLeft: '3px solid var(--ds-error)',
-                  fontFamily: 'monospace',
-                  fontSize: '0.82rem',
-                  color: 'var(--ds-text-primary)',
-                  wordBreak: 'break-word',
-                  boxShadow: 'var(--ds-shadow-sm)',
-                }}
-              >
-                &ldquo;{finding.source_text || finding.source_value || 'Direct calculation'}&rdquo;
-              </div>
-            </div>
-
-            {/* Document Controls Header with Interactive Page Navigation */}
+        <div>
+          {comparedDoc && (
             <div
               style={{
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'space-between',
-                paddingBottom: 12,
-                borderBottom: '1px solid var(--ds-border-light)',
                 marginBottom: 16,
+                padding: '12px 18px',
+                background: 'var(--ds-surface)',
+                border: '1px solid var(--ds-border)',
+                borderRadius: 'var(--ds-radius)',
                 flexWrap: 'wrap',
-                gap: 10,
+                gap: 12,
               }}
             >
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                <FileText size={18} color="var(--ds-teal-500)" />
-                <span style={{ fontWeight: 600, fontSize: '0.85rem' }}>
-                  {sourceDoc?.file_name || (finding.source_document_id ? `${finding.source_document_id}.pdf` : 'Source Document')}
+                <GitCompareArrows size={18} color="var(--ds-teal-500)" />
+                <span style={{ fontWeight: 600, fontSize: '0.9rem' }}>
+                  Dual-Sided Grounded Evidence Comparison
                 </span>
-
-                {/* Interactive Page Navigation Controls */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginLeft: 6 }}>
-                  <button
-                    onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
-                    disabled={currentPage <= 1}
-                    className="icon-btn"
-                    title="Previous Page"
-                    style={{ padding: '3px 6px', height: 28, opacity: currentPage <= 1 ? 0.4 : 1 }}
-                  >
-                    <ChevronLeft size={15} />
-                  </button>
-                  <span className="badge badge-info" style={{ fontSize: '0.75rem' }}>
-                    Page {currentPage} of {totalPages}
-                  </span>
-                  <button
-                    onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
-                    disabled={currentPage >= totalPages}
-                    className="icon-btn"
-                    title="Next Page"
-                    style={{ padding: '3px 6px', height: 28, opacity: currentPage >= totalPages ? 0.4 : 1 }}
-                  >
-                    <ChevronRight size={15} />
-                  </button>
-                </div>
-              </div>
-
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                {sourceDoc && (
-                  <a
-                    href={`/api/documents/${sourceDoc.id}/file`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="icon-btn"
-                    title="Download/Open Raw File"
-                    style={{ textDecoration: 'none', color: 'inherit', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-                  >
-                    <Download size={16} />
-                  </a>
-                )}
-                <button
-                  onClick={() => setZoomLevel((z) => Math.max(70, z - 10))}
-                  className="icon-btn"
-                  title="Zoom Out"
-                >
-                  <ZoomOut size={16} />
-                </button>
-                <span style={{ fontSize: '0.78rem', color: 'var(--ds-text-secondary)', minWidth: 42, textAlign: 'center' }}>
-                  {zoomLevel}%
+                <span className="badge badge-info">
+                  {sourceDoc?.category?.replace(/_/g, ' ').toUpperCase() || 'SOURCE'} vs {comparedDoc.category?.replace(/_/g, ' ').toUpperCase() || 'BASELINE'}
                 </span>
+              </div>
+
+              {/* View Mode Segmented Control */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'var(--ds-bg)', padding: 3, borderRadius: 'var(--ds-radius)' }}>
                 <button
-                  onClick={() => setZoomLevel((z) => Math.min(140, z + 10))}
-                  className="icon-btn"
-                  title="Zoom In"
+                  type="button"
+                  onClick={() => setViewMode('dual')}
+                  className={`btn ${viewMode === 'dual' ? 'btn-primary' : 'btn-secondary'}`}
+                  style={{ fontSize: '0.75rem', padding: '5px 12px' }}
                 >
-                  <ZoomIn size={16} />
+                  Side-by-Side (1:1)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setViewMode('source')}
+                  className={`btn ${viewMode === 'source' ? 'btn-primary' : 'btn-secondary'}`}
+                  style={{ fontSize: '0.75rem', padding: '5px 12px' }}
+                >
+                  Source Only
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setViewMode('compared')}
+                  className={`btn ${viewMode === 'compared' ? 'btn-primary' : 'btn-secondary'}`}
+                  style={{ fontSize: '0.75rem', padding: '5px 12px' }}
+                >
+                  Baseline Only
                 </button>
               </div>
             </div>
+          )}
 
-            {/* Document Canvas with Highlighting */}
-            <div
-              style={{
-                background: '#fafafa',
-                border: '1px solid var(--ds-border)',
-                borderRadius: 'var(--ds-radius)',
-                padding: '24px 28px',
-                minHeight: 460,
-                maxHeight: 640,
-                overflowY: 'auto',
-                transform: `scale(${zoomLevel / 100})`,
-                transformOrigin: 'top center',
-                transition: 'transform 0.2s ease',
-              }}
-            >
-              {renderHighlightedDocumentText()}
-            </div>
-          </div>
-
-          {/* Right: Evidence Inspection, AI Explanation & Actions */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-            {/* Extracted Values Cross-Reference */}
-            <div className="card" style={{ padding: 20 }}>
-              <h3 style={{ fontSize: '0.95rem', fontWeight: 600, marginBottom: 14 }}>
-                Evidence Grounding
-              </h3>
-
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                <div>
-                  <span style={{ fontSize: '0.75rem', color: 'var(--ds-text-muted)' }}>Flagged Field:</span>
-                  <div style={{ fontWeight: 600, fontSize: '0.95rem', color: 'var(--ds-text-primary)' }}>
-                    {finding.source_field || 'Value / Obligation'}
-                  </div>
-                </div>
-
-                <div>
-                  <span style={{ fontSize: '0.75rem', color: 'var(--ds-text-muted)' }}>Observed Value:</span>
-                  <div style={{ fontWeight: 700, fontSize: '1.1rem', color: 'var(--ds-error)' }}>
-                    {finding.source_value ? `₹ ${parseFloat(finding.source_value).toLocaleString('en-IN')}` : 'N/A'}
-                  </div>
-                </div>
-
-                <div>
-                  <span style={{ fontSize: '0.75rem', color: 'var(--ds-text-muted)' }}>Related Comparison:</span>
-                  <div style={{ fontSize: '0.85rem', color: 'var(--ds-text-secondary)', marginTop: 4 }}>
-                    {comparedDoc?.file_name || 'Comparison Document'} • Expected: <strong>
-                      {finding.compared_value ? `₹ ${parseFloat(finding.compared_value).toLocaleString('en-IN')}` : 'N/A'}
-                    </strong>
-                  </div>
-                </div>
-
-                <div>
-                  <span style={{ fontSize: '0.75rem', color: 'var(--ds-text-muted)' }}>Engine Reason:</span>
-                  <p style={{ fontSize: '0.82rem', color: 'var(--ds-text-secondary)', margin: '4px 0 0 0', lineHeight: 1.5 }}>
-                    {finding.reason}
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            {/* AI Root Cause & Recommendation Card */}
-            <div className="card" style={{ padding: 20, border: '1px solid rgba(13, 148, 136, 0.25)' }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <Sparkles size={16} color="var(--ds-teal-500)" />
-                  <h3 style={{ fontSize: '0.95rem', fontWeight: 600, margin: 0 }}>
-                    AI Root Cause Analysis
-                  </h3>
-                </div>
-                <button
-                  onClick={handleFetchAiExplanation}
-                  disabled={isLoadingAi}
-                  className="btn btn-secondary"
-                  style={{ padding: '3px 8px', fontSize: '0.72rem' }}
-                  title="Generate or Refresh AI Explanation"
-                >
-                  {isLoadingAi ? (
-                    <RefreshCw size={12} className="spin" />
-                  ) : (
-                    <RefreshCw size={12} />
-                  )}
-                  <span>{aiExplanation ? 'Refresh' : 'Analyze'}</span>
-                </button>
-              </div>
-
-              {aiExplanation ? (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 10, fontSize: '0.82rem' }}>
-                  <div>
-                    <span style={{ fontSize: '0.75rem', color: 'var(--ds-text-muted)' }}>Root Cause:</span>
-                    <p style={{ margin: '2px 0 0 0', color: 'var(--ds-text-primary)', lineHeight: 1.4 }}>
-                      {aiExplanation.rootCause}
-                    </p>
-                  </div>
-                  <div>
-                    <span style={{ fontSize: '0.75rem', color: 'var(--ds-text-muted)' }}>Recommended Action:</span>
-                    <p style={{ margin: '2px 0 0 0', color: 'var(--ds-text-secondary)', lineHeight: 1.4 }}>
-                      {aiExplanation.recommendedAction}
-                    </p>
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 4, paddingTop: 8, borderTop: '1px solid var(--ds-border-light)' }}>
-                    <span style={{ fontSize: '0.72rem', color: 'var(--ds-text-muted)' }}>
-                      Confidence: {(aiExplanation.confidence * 100).toFixed(0)}% • {aiExplanation.modelUsed}
-                    </span>
-                    <span className="badge badge-info" style={{ fontSize: '0.7rem' }}>
-                      AI Generated
-                    </span>
-                  </div>
-                </div>
-              ) : (
-                <div style={{ textAlign: 'center', padding: '16px 8px', color: 'var(--ds-text-muted)', fontSize: '0.82rem' }}>
-                  <p style={{ margin: '0 0 10px 0' }}>
-                    Generate an AI root cause diagnosis and recommended auditor action based on cross-document evidence.
-                  </p>
-                  <button
-                    onClick={handleFetchAiExplanation}
-                    disabled={isLoadingAi}
-                    className="btn btn-secondary"
-                    style={{ fontSize: '0.78rem', margin: '0 auto' }}
-                  >
-                    <Sparkles size={14} color="var(--ds-teal-500)" />
-                    <span>{isLoadingAi ? 'Analyzing Evidence...' : 'Generate AI Diagnosis'}</span>
-                  </button>
-                </div>
-              )}
-
-              {aiError && (
-                <div style={{ fontSize: '0.75rem', color: 'var(--ds-error)', marginTop: 8 }}>
-                  {aiError}
-                </div>
-              )}
-            </div>
-
-            {/* Inline Review Decision Panel */}
-            <div className="card" style={{ padding: 20 }}>
-              <h3 style={{ fontSize: '0.95rem', fontWeight: 600, marginBottom: 14 }}>
-                Review Decision Actions
-              </h3>
-
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 6 }}>
-                  <button
-                    type="button"
-                    onClick={() => setReviewDecision('accepted')}
-                    className={`btn ${reviewDecision === 'accepted' ? 'btn-primary' : 'btn-secondary'}`}
-                    style={{ fontSize: '0.75rem', padding: '8px 4px', justifyContent: 'center' }}
-                  >
-                    <CheckCircle size={13} />
-                    <span>Confirm</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setReviewDecision('rejected')}
-                    className={`btn ${reviewDecision === 'rejected' ? 'btn-primary' : 'btn-secondary'}`}
-                    style={{ fontSize: '0.75rem', padding: '8px 4px', justifyContent: 'center' }}
-                  >
-                    <XCircle size={13} />
-                    <span>Dismiss</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setReviewDecision('reviewing')}
-                    className={`btn ${reviewDecision === 'reviewing' ? 'btn-primary' : 'btn-secondary'}`}
-                    style={{ fontSize: '0.75rem', padding: '8px 4px', justifyContent: 'center' }}
-                  >
-                    <HelpCircle size={13} />
-                    <span>Investigate</span>
-                  </button>
-                </div>
-
-                <textarea
-                  className="form-input"
-                  rows={2}
-                  placeholder="Reviewer justification or notes..."
-                  value={reviewComment}
-                  onChange={(e) => setReviewComment(e.target.value)}
-                  style={{ fontSize: '0.8rem', resize: 'vertical' }}
-                />
-
-                <button
-                  onClick={handleSaveReview}
-                  disabled={isSavingReview}
-                  className="btn btn-primary"
-                  style={{ width: '100%', justifyContent: 'center' }}
-                >
-                  {isSavingReview ? (
-                    <>
-                      <RefreshCw size={14} className="spin" />
-                      <span>Saving...</span>
-                    </>
-                  ) : (
-                    <>
-                      <Check size={14} />
-                      <span>Save Decision</span>
-                    </>
-                  )}
-                </button>
-              </div>
-
+          {/* Dual Side-by-Side Comparison Layout */}
+          {comparedDoc && viewMode === 'dual' ? (
+            <div>
               <div
                 style={{
-                  marginTop: 14,
-                  padding: '8px 10px',
-                  borderRadius: 'var(--ds-radius)',
-                  background: 'var(--ds-info-bg)',
-                  border: '1px solid rgba(59, 130, 246, 0.2)',
-                  fontSize: '0.74rem',
-                  color: 'var(--ds-info)',
-                  display: 'flex',
-                  alignItems: 'flex-start',
-                  gap: 8,
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(auto-fit, minmax(460px, 1fr))',
+                  gap: 20,
+                  marginBottom: 24,
                 }}
               >
-                <Shield size={14} style={{ flexShrink: 0, marginTop: 1 }} />
-                <span>
-                  All human decisions are permanently recorded in the immutable audit log.
-                </span>
+                {/* Left: Source Document Evidence */}
+                {renderDocumentEvidenceCanvas({
+                  side: 'source',
+                  doc: sourceDoc,
+                  text: docText,
+                  isLoading: isLoadingText,
+                  page: currentPage,
+                  totalPages,
+                  setPage: setCurrentPage,
+                  zoom: zoomLevel,
+                  setZoom: setZoomLevel,
+                  fieldName: finding.source_field,
+                  value: finding.source_value,
+                  passage: finding.source_text,
+                  verified: finding.source_verified,
+                  boundingBox: finding.source_bounding_box,
+                })}
+
+                {/* Right: Compared Document Evidence */}
+                {renderDocumentEvidenceCanvas({
+                  side: 'compared',
+                  doc: comparedDoc,
+                  text: comparedDocText,
+                  isLoading: isLoadingComparedText,
+                  page: comparedCurrentPage,
+                  totalPages: comparedTotalPages,
+                  setPage: setComparedCurrentPage,
+                  zoom: comparedZoomLevel,
+                  setZoom: setComparedZoomLevel,
+                  fieldName: finding.compared_field,
+                  value: finding.compared_value,
+                  passage: finding.compared_text,
+                  verified: finding.compared_verified,
+                  boundingBox: finding.compared_bounding_box,
+                })}
+              </div>
+
+              {/* Bottom Row: AI Analysis & Review Decision */}
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))',
+                  gap: 20,
+                }}
+              >
+                {renderAiExplanationCard()}
+                {renderReviewDecisionCard()}
               </div>
             </div>
-          </div>
+          ) : (
+            /* Single Focus View (Source or Compared, or when no comparison doc exists) */
+            <div className="evidence-split-layout">
+              <div>
+                {viewMode === 'compared' && comparedDoc ? (
+                  renderDocumentEvidenceCanvas({
+                    side: 'compared',
+                    doc: comparedDoc,
+                    text: comparedDocText,
+                    isLoading: isLoadingComparedText,
+                    page: comparedCurrentPage,
+                    totalPages: comparedTotalPages,
+                    setPage: setComparedCurrentPage,
+                    zoom: comparedZoomLevel,
+                    setZoom: setComparedZoomLevel,
+                    fieldName: finding.compared_field,
+                    value: finding.compared_value,
+                    passage: finding.compared_text,
+                    verified: finding.compared_verified,
+                    boundingBox: finding.compared_bounding_box,
+                  })
+                ) : (
+                  renderDocumentEvidenceCanvas({
+                    side: 'source',
+                    doc: sourceDoc,
+                    text: docText,
+                    isLoading: isLoadingText,
+                    page: currentPage,
+                    totalPages,
+                    setPage: setCurrentPage,
+                    zoom: zoomLevel,
+                    setZoom: setZoomLevel,
+                    fieldName: finding.source_field,
+                    value: finding.source_value,
+                    passage: finding.source_text,
+                    verified: finding.source_verified,
+                    boundingBox: finding.source_bounding_box,
+                  })
+                )}
+              </div>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+                {renderEvidenceCrossReferenceCard()}
+                {renderAiExplanationCard()}
+                {renderReviewDecisionCard()}
+              </div>
+            </div>
+          )}
         </div>
       )}
 

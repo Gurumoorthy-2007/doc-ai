@@ -36,6 +36,7 @@ export async function GET(
     let sourceDoc = null;
     let comparedDoc = null;
     let sourceFields: import('@/lib/types').ExtractedField[] = [];
+    let comparedFields: import('@/lib/types').ExtractedField[] = [];
 
     if (finding.source_document_id) {
       sourceDoc = await ServerPersistence.getDocumentById(finding.source_document_id);
@@ -43,6 +44,7 @@ export async function GET(
     }
     if (finding.compared_document_id) {
       comparedDoc = await ServerPersistence.getDocumentById(finding.compared_document_id);
+      comparedFields = await ServerPersistence.getExtractedFields(finding.compared_document_id);
     }
 
     return NextResponse.json({
@@ -52,6 +54,7 @@ export async function GET(
         sourceDocument: sourceDoc,
         comparedDocument: comparedDoc,
         sourceFields,
+        comparedFields,
       },
     });
   } catch (err: unknown) {

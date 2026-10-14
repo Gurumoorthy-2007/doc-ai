@@ -193,6 +193,7 @@ function DocumentDetailsContent({ params }: { params: Promise<{ id: string }> })
       confidence: 1.0,
       is_missing: false,
       is_ambiguous: false,
+      verified: true,
       source_text: 'Manual table entry',
       source_page: 1,
       created_at: new Date().toISOString(),
@@ -704,19 +705,20 @@ function DocumentDetailsContent({ params }: { params: Promise<{ id: string }> })
             <table className="table">
               <thead>
                 <tr>
-                  <th style={{ width: isEditing ? '22%' : '20%' }}>Field Name</th>
-                  <th style={{ width: isEditing ? '25%' : '24%' }}>Extracted Value</th>
-                  <th style={{ width: isEditing ? '14%' : '12%' }}>Data Type</th>
-                  <th style={{ width: isEditing ? '12%' : '12%' }}>AI Confidence</th>
-                  <th style={{ width: isEditing ? '9%' : '8%' }}>Page</th>
-                  <th style={{ width: isEditing ? '20%' : '24%' }}>Source Evidence Text</th>
+                  <th style={{ width: isEditing ? '19%' : '18%' }}>Field Name</th>
+                  <th style={{ width: isEditing ? '22%' : '20%' }}>Extracted Value</th>
+                  <th style={{ width: isEditing ? '11%' : '10%' }}>Data Type</th>
+                  <th style={{ width: isEditing ? '11%' : '10%' }}>AI Confidence</th>
+                  <th style={{ width: isEditing ? '11%' : '12%' }}>Verification</th>
+                  <th style={{ width: isEditing ? '8%' : '7%' }}>Page</th>
+                  <th style={{ width: isEditing ? '12%' : '23%' }}>Source Evidence Text</th>
                   {isEditing && <th style={{ width: '6%', textAlign: 'center' }}>Action</th>}
                 </tr>
               </thead>
               <tbody>
                 {currentFields.length === 0 ? (
                   <tr>
-                    <td colSpan={isEditing ? 7 : 6} style={{ textAlign: 'center', padding: '40px 20px', color: 'var(--ds-text-muted)' }}>
+                    <td colSpan={isEditing ? 8 : 7} style={{ textAlign: 'center', padding: '40px 20px', color: 'var(--ds-text-muted)' }}>
                       No fields found. {isEditing ? 'Click "Add Row" above to create a field.' : 'Click "Edit Table Format" to enter fields manually.'}
                     </td>
                   </tr>
@@ -780,6 +782,17 @@ function DocumentDetailsContent({ params }: { params: Promise<{ id: string }> })
                             </div>
                           </td>
                           <td>
+                            <select
+                              className="table-edit-input"
+                              value={f.verified === false ? 'false' : 'true'}
+                              onChange={(e) => handleUpdateField(index, 'verified', e.target.value === 'true')}
+                              aria-label={`Verification status row ${index + 1}`}
+                            >
+                              <option value="true">Verified</option>
+                              <option value="false">Unverified</option>
+                            </select>
+                          </td>
+                          <td>
                             <input
                               type="number"
                               min="1"
@@ -836,8 +849,29 @@ function DocumentDetailsContent({ params }: { params: Promise<{ id: string }> })
                               '—'
                             )}
                           </td>
+                          <td>
+                            {f.verified === false ? (
+                              <span
+                                className="badge badge-warning"
+                                title="Passage was not located character-for-character in raw document text"
+                                style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}
+                              >
+                                <AlertTriangle size={11} />
+                                <span>Unverified</span>
+                              </span>
+                            ) : (
+                              <span
+                                className="badge badge-success"
+                                title={f.bounding_box ? `Passage verified • Page ${f.bounding_box.page}` : 'Passage verified in text'}
+                                style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}
+                              >
+                                <CheckCircle size={11} />
+                                <span>Verified</span>
+                              </span>
+                            )}
+                          </td>
                           <td style={{ fontSize: '0.8rem', color: 'var(--ds-text-muted)' }}>
-                            Page {f.source_page || 1}
+                            {f.source_page ? `Page ${f.source_page}` : '—'}
                           </td>
                           <td style={{ fontSize: '0.8rem', color: 'var(--ds-text-secondary)', maxWidth: 280 }}>
                             <code style={{ background: 'var(--ds-bg)', padding: '2px 6px', borderRadius: 4, fontSize: '0.75rem' }}>

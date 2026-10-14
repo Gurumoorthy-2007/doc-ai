@@ -343,6 +343,7 @@ export class DataStore {
     sourceDocument: Document | null;
     comparedDocument: Document | null;
     sourceFields: ExtractedField[];
+    comparedFields: ExtractedField[];
   }> {
     try {
       const res = await fetch(`/api/findings/${id}`);
@@ -354,6 +355,7 @@ export class DataStore {
             sourceDocument: json.data.sourceDocument,
             comparedDocument: json.data.comparedDocument,
             sourceFields: json.data.sourceFields || [],
+            comparedFields: json.data.comparedFields || [],
           };
         }
       }
@@ -365,12 +367,14 @@ export class DataStore {
     const sourceDoc = finding?.source_document_id ? this.getDocumentById(finding.source_document_id) : null;
     const comparedDoc = finding?.compared_document_id ? this.getDocumentById(finding.compared_document_id) : null;
     const sourceFields = sourceDoc ? this.getExtractedFields(sourceDoc.id) : [];
+    const comparedFields = comparedDoc ? this.getExtractedFields(comparedDoc.id) : [];
 
     return {
       finding,
       sourceDocument: sourceDoc,
       comparedDocument: comparedDoc,
       sourceFields,
+      comparedFields,
     };
   }
 

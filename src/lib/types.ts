@@ -36,6 +36,7 @@ export type FindingType =
   | 'tax_discrepancy'
   | 'vendor_name_variation'
   | 'unusual_amount'
+  | 'data_validation'
   | 'other';
 
 export type ReconciliationStatus =
@@ -82,6 +83,14 @@ export interface Document {
   updated_at: string;
 }
 
+export interface BoundingBox {
+  page: number;
+  x: number;      // normalized 0..1 (horizontal offset from left)
+  y: number;      // normalized 0..1 (vertical offset from top)
+  width: number;  // normalized 0..1 width
+  height: number; // normalized 0..1 height
+}
+
 export interface ExtractedField {
   id: string;
   document_id: string;
@@ -93,6 +102,8 @@ export interface ExtractedField {
   is_ambiguous: boolean;
   source_text: string | null;
   source_page: number | null;
+  verified?: boolean;
+  bounding_box?: BoundingBox | null;
   created_at: string;
 }
 
@@ -106,6 +117,8 @@ export interface LineItem {
   amount: number | null;
   unit: string | null;
   source_page: number | null;
+  verified?: boolean;
+  bounding_box?: BoundingBox | null;
   created_at: string;
 }
 
@@ -155,9 +168,13 @@ export interface Finding {
   source_field: string | null;
   source_page: number | null;
   source_text: string | null;
+  source_verified?: boolean;
+  source_bounding_box?: BoundingBox | null;
   compared_field: string | null;
   compared_page: number | null;
   compared_text: string | null;
+  compared_verified?: boolean;
+  compared_bounding_box?: BoundingBox | null;
   reviewed_by: string | null;
   reviewed_at: string | null;
   is_reviewed?: boolean;

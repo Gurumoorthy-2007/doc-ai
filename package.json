@@ -8,8 +8,8 @@
     "start": "next start",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test tests/reconciliation.test.mjs tests/integration.test.mjs tests/nvidia.test.mjs tests/security.test.mjs tests/audit_chain.test.mjs",
-    "test:all": "tsx --test tests/reconciliation.test.mjs tests/integration.test.mjs tests/nvidia.test.mjs tests/security.test.mjs tests/audit_chain.test.mjs && node tests/test_journey.mjs"
+    "test": "tsx --test tests/reconciliation.test.mjs tests/integration.test.mjs tests/nvidia.test.mjs tests/security.test.mjs tests/audit_chain.test.mjs tests/evidence_grounding.test.mjs",
+    "test:all": "tsx --test tests/reconciliation.test.mjs tests/integration.test.mjs tests/nvidia.test.mjs tests/security.test.mjs tests/audit_chain.test.mjs tests/evidence_grounding.test.mjs && node tests/test_journey.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.7",

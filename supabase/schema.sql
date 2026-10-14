@@ -120,6 +120,8 @@ create table if not exists public.extracted_fields (
   is_ambiguous boolean not null default false,
   source_text text,
   source_page integer,
+  verified boolean not null default true,
+  bounding_box jsonb,
   created_at timestamptz not null default now()
 );
 
@@ -154,6 +156,8 @@ create table if not exists public.line_items (
   amount numeric(15,2),
   unit text,
   source_page integer,
+  verified boolean not null default true,
+  bounding_box jsonb,
   created_at timestamptz not null default now()
 );
 
@@ -224,7 +228,7 @@ create type finding_type as enum (
   'quantity_discrepancy', 'unit_price_discrepancy', 'missing_field',
   'duplicate_invoice', 'payment_term_mismatch', 'date_discrepancy',
   'exceeds_po_amount', 'exceeds_contract_value', 'tax_discrepancy',
-  'vendor_name_variation', 'unusual_amount', 'other'
+  'vendor_name_variation', 'unusual_amount', 'data_validation', 'other'
 );
 
 create table if not exists public.findings (
@@ -246,9 +250,13 @@ create table if not exists public.findings (
   source_field text,
   source_page integer,
   source_text text,
+  source_verified boolean default true,
+  source_bounding_box jsonb,
   compared_field text,
   compared_page integer,
   compared_text text,
+  compared_verified boolean default true,
+  compared_bounding_box jsonb,
   reviewed_by uuid references public.profiles(id) on delete set null,
   reviewed_at timestamptz,
   created_at timestamptz not null default now(),

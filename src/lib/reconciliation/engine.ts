@@ -10,6 +10,7 @@ import type {
   FindingType,
   FindingSeverity,
   ReconciliationStatus,
+  BoundingBox,
 } from '@/lib/types';
 
 export interface DocumentData {
@@ -267,9 +268,13 @@ function makeFinding(params: {
   source_field?: string | null;
   source_page?: number | null;
   source_text?: string | null;
+  source_verified?: boolean;
+  source_bounding_box?: BoundingBox | null;
   compared_field?: string | null;
   compared_page?: number | null;
   compared_text?: string | null;
+  compared_verified?: boolean;
+  compared_bounding_box?: BoundingBox | null;
   reconciliation_group_id?: string | null;
 }): Omit<Finding, 'id' | 'user_id' | 'created_at' | 'updated_at'> {
   return {
@@ -292,9 +297,13 @@ function makeFinding(params: {
     source_field: params.source_field ?? null,
     source_page: params.source_page ?? null,
     source_text: params.source_text ?? null,
+    source_verified: params.source_verified ?? true,
+    source_bounding_box: params.source_bounding_box ?? null,
     compared_field: params.compared_field ?? null,
     compared_page: params.compared_page ?? null,
     compared_text: params.compared_text ?? null,
+    compared_verified: params.compared_verified ?? true,
+    compared_bounding_box: params.compared_bounding_box ?? null,
     reviewed_by: null,
     reviewed_at: null,
     is_reviewed: false,
@@ -512,8 +521,12 @@ export function reconcileDocuments(
             compared_field: 'total',
             source_page: invoice?.fields['total']?.source_page ?? 1,
             source_text: invoice?.fields['total']?.source_text ?? null,
+            source_verified: invoice?.fields['total']?.verified ?? true,
+            source_bounding_box: invoice?.fields['total']?.bounding_box ?? null,
             compared_page: purchaseOrder?.fields['total']?.source_page ?? 1,
             compared_text: purchaseOrder?.fields['total']?.source_text ?? null,
+            compared_verified: purchaseOrder?.fields['total']?.verified ?? true,
+            compared_bounding_box: purchaseOrder?.fields['total']?.bounding_box ?? null,
             reconciliation_group_id: reconGroupId,
           })
         );
@@ -537,6 +550,14 @@ export function reconcileDocuments(
             calculation_method: 'Variance = Invoice Stated Total - Approved PO Total',
             source_field: 'total',
             compared_field: 'total',
+            source_page: invoice?.fields['total']?.source_page ?? 1,
+            source_text: invoice?.fields['total']?.source_text ?? null,
+            source_verified: invoice?.fields['total']?.verified ?? true,
+            source_bounding_box: invoice?.fields['total']?.bounding_box ?? null,
+            compared_page: purchaseOrder?.fields['total']?.source_page ?? 1,
+            compared_text: purchaseOrder?.fields['total']?.source_text ?? null,
+            compared_verified: purchaseOrder?.fields['total']?.verified ?? true,
+            compared_bounding_box: purchaseOrder?.fields['total']?.bounding_box ?? null,
             reconciliation_group_id: reconGroupId,
           })
         );

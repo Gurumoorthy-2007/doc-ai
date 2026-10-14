@@ -4,6 +4,7 @@ import { getFileFromStorage, validateAndInspectFile } from '@/lib/server/fileSto
 import { extractDocumentWithEvidence } from '@/lib/ai/extraction';
 import { authenticateRequest, checkDocumentOwnership } from '@/lib/server/auth';
 import { getGlobalRateLimiter, PROCESS_LIMIT } from '@/lib/server/rateLimit';
+import { routeLowConfidenceFieldsToReview } from '@/lib/server/reviewRouting';
 
 export async function POST(
   req: NextRequest,
@@ -94,6 +95,9 @@ export async function POST(
       processing_completed_at: new Date().toISOString(),
       processing_attempts: (doc.processing_attempts || 0) + 1,
     });
+
+    // Route low confidence or unverified fields to the human review queue
+    await routeLowConfidenceFieldsToReview(updatedDoc, extraction.fields);
 
     await ServerPersistence.addAuditEvent({
       user_name: auth.user.name,
