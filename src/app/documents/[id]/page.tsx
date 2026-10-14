@@ -24,6 +24,10 @@ import {
   FileCheck,
   BookOpen,
   X,
+  Edit3,
+  Save,
+  Plus,
+  Trash2,
 } from 'lucide-react';
 import { format } from 'date-fns';
 
@@ -54,6 +58,14 @@ function DocumentDetailsContent({ params }: { params: Promise<{ id: string }> })
   const [isLoadingSummary, setIsLoadingSummary] = useState(false);
   const [showSummaryModal, setShowSummaryModal] = useState(false);
   const [summaryError, setSummaryError] = useState<string | null>(null);
+
+  // Table Edit Mode State
+  const [isEditing, setIsEditing] = useState(false);
+  const [editFields, setEditFields] = useState<ExtractedField[]>([]);
+  const [editLineItems, setEditLineItems] = useState<LineItem[]>([]);
+  const [isSaving, setIsSaving] = useState(false);
+  const [saveSuccess, setSaveSuccess] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   useEffect(() => {
     let isMounted = true;
@@ -125,6 +137,114 @@ function DocumentDetailsContent({ params }: { params: Promise<{ id: string }> })
       setIsLoadingSummary(false);
     }
   };
+
+  // Table Editing Handlers
+  const handleStartEditing = () => {
+    setEditFields(fields.map((f) => ({ ...f })));
+    setEditLineItems(lineItems.map((li) => ({ ...li })));
+    setIsEditing(true);
+    setSaveSuccess(false);
+    setSaveError(null);
+  };
+
+  const handleCancelEditing = () => {
+    setIsEditing(false);
+    setEditFields([]);
+    setEditLineItems([]);
+    setSaveError(null);
+  };
+
+  const handleSaveChanges = async () => {
+    if (!doc) return;
+    setIsSaving(true);
+    setSaveError(null);
+    try {
+      const res = await DataStore.updateDocumentFieldsApi(doc.id, editFields, editLineItems);
+      if (res.success) {
+        setFields(res.fields);
+        setLineItems(res.lineItems);
+        setIsEditing(false);
+        setSaveSuccess(true);
+        setTimeout(() => setSaveSuccess(false), 5000);
+      }
+    } catch (err: unknown) {
+      setSaveError((err as Error).message || 'Failed to save changes to document');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleUpdateField = (index: number, key: keyof ExtractedField, value: any) => {
+    setEditFields((prev) => {
+      const updated = [...prev];
+      updated[index] = { ...updated[index], [key]: value };
+      return updated;
+    });
+  };
+
+  const handleAddField = () => {
+    if (!doc) return;
+    const newField: ExtractedField = {
+      id: `field-${doc.id}-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+      document_id: doc.id,
+      field_name: 'new_field',
+      field_value: '',
+      field_type: 'string',
+      confidence: 1.0,
+      is_missing: false,
+      is_ambiguous: false,
+      source_text: 'Manual table entry',
+      source_page: 1,
+      created_at: new Date().toISOString(),
+    };
+    setEditFields((prev) => [...prev, newField]);
+  };
+
+  const handleRemoveField = (index: number) => {
+    setEditFields((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  const handleUpdateLineItem = (index: number, key: keyof LineItem, value: any) => {
+    setEditLineItems((prev) => {
+      const updated = [...prev];
+      const item = { ...updated[index], [key]: value };
+
+      if (key === 'quantity' || key === 'unit_price') {
+        const qty = key === 'quantity' ? (parseFloat(value) || 0) : (item.quantity || 0);
+        const price = key === 'unit_price' ? (parseFloat(value) || 0) : (item.unit_price || 0);
+        item.amount = Math.round(qty * price * 100) / 100;
+      }
+
+      updated[index] = item;
+      return updated;
+    });
+  };
+
+  const handleAddLineItem = () => {
+    if (!doc) return;
+    const nextNumber = editLineItems.length + 1;
+    const newItem: LineItem = {
+      id: `li-${doc.id}-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+      document_id: doc.id,
+      item_number: nextNumber,
+      description: 'New Line Item',
+      quantity: 1,
+      unit_price: 0,
+      amount: 0,
+      unit: 'unit',
+      source_page: 1,
+      created_at: new Date().toISOString(),
+    };
+    setEditLineItems((prev) => [...prev, newItem]);
+  };
+
+  const handleRemoveLineItem = (index: number) => {
+    setEditLineItems((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  const currentFields = isEditing ? editFields : fields;
+  const currentLineItems = isEditing ? editLineItems : lineItems;
+  const lineItemsTotal = currentLineItems.reduce((acc, li) => acc + (li.amount || 0), 0);
 
   if (!doc) {
     return (
@@ -205,6 +325,39 @@ function DocumentDetailsContent({ params }: { params: Promise<{ id: string }> })
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+            {isEditing ? (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <button
+                  type="button"
+                  onClick={handleSaveChanges}
+                  className="btn btn-primary"
+                  disabled={isSaving}
+                >
+                  {isSaving ? <RefreshCw size={14} className="spin" /> : <Save size={14} />}
+                  <span>Save Table Data</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleCancelEditing}
+                  className="btn btn-secondary"
+                  disabled={isSaving}
+                >
+                  <X size={14} />
+                  <span>Cancel</span>
+                </button>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={handleStartEditing}
+                className="btn btn-secondary"
+                title="Edit extracted data in table format"
+              >
+                <Edit3 size={14} color="var(--ds-teal-500)" />
+                <span>Edit Table Data</span>
+              </button>
+            )}
+
             <button
               onClick={handleGenerateSummary}
               className="btn btn-secondary"
@@ -250,6 +403,140 @@ function DocumentDetailsContent({ params }: { params: Promise<{ id: string }> })
         </div>
       </div>
 
+      {/* Table Edit Status & Alerts */}
+      {saveSuccess && (
+        <div
+          role="status"
+          style={{
+            background: 'var(--ds-success-bg)',
+            border: '1px solid rgba(16, 185, 129, 0.3)',
+            borderRadius: 'var(--ds-radius)',
+            padding: '12px 18px',
+            marginBottom: 20,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <CheckCircle size={18} color="var(--ds-success)" />
+            <span style={{ fontSize: '0.88rem', fontWeight: 600, color: 'var(--ds-success)' }}>
+              Document table data updated and saved successfully!
+            </span>
+          </div>
+          <button
+            onClick={() => setSaveSuccess(false)}
+            style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--ds-success)' }}
+            aria-label="Dismiss success message"
+          >
+            <X size={16} />
+          </button>
+        </div>
+      )}
+
+      {saveError && (
+        <div
+          role="alert"
+          style={{
+            background: 'var(--ds-error-bg)',
+            border: '1px solid rgba(239, 68, 68, 0.3)',
+            borderRadius: 'var(--ds-radius)',
+            padding: '12px 18px',
+            marginBottom: 20,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <AlertTriangle size={18} color="var(--ds-error)" />
+            <span style={{ fontSize: '0.88rem', fontWeight: 600, color: 'var(--ds-error)' }}>
+              {saveError}
+            </span>
+          </div>
+          <button
+            onClick={() => setSaveError(null)}
+            style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--ds-error)' }}
+            aria-label="Dismiss error message"
+          >
+            <X size={16} />
+          </button>
+        </div>
+      )}
+
+      {isEditing && (
+        <div
+          style={{
+            background: 'rgba(13, 148, 136, 0.08)',
+            border: '1px solid var(--ds-teal-500)',
+            borderRadius: 'var(--ds-radius)',
+            padding: '12px 20px',
+            marginBottom: 20,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            flexWrap: 'wrap',
+            gap: 12,
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <Sparkles size={18} color="var(--ds-teal-500)" />
+            <div>
+              <div style={{ fontSize: '0.88rem', fontWeight: 700, color: 'var(--ds-text-primary)' }}>
+                Table Editing Mode Active
+              </div>
+              <div style={{ fontSize: '0.78rem', color: 'var(--ds-text-secondary)' }}>
+                Modify values directly in the table cells. Amounts auto-recalculate from quantity and unit price.
+              </div>
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            {activeTab === 'fields' && (
+              <button
+                type="button"
+                onClick={handleAddField}
+                className="btn btn-secondary btn-sm"
+                style={{ display: 'flex', alignItems: 'center', gap: 4 }}
+              >
+                <Plus size={14} />
+                <span>Add Field Row</span>
+              </button>
+            )}
+            {activeTab === 'lineItems' && (
+              <button
+                type="button"
+                onClick={handleAddLineItem}
+                className="btn btn-secondary btn-sm"
+                style={{ display: 'flex', alignItems: 'center', gap: 4 }}
+              >
+                <Plus size={14} />
+                <span>Add Item Row</span>
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={handleSaveChanges}
+              className="btn btn-primary btn-sm"
+              disabled={isSaving}
+              style={{ display: 'flex', alignItems: 'center', gap: 4 }}
+            >
+              {isSaving ? <RefreshCw size={14} className="spin" /> : <Save size={14} />}
+              <span>Save Table Data</span>
+            </button>
+            <button
+              type="button"
+              onClick={handleCancelEditing}
+              className="btn btn-secondary btn-sm"
+              disabled={isSaving}
+            >
+              <X size={14} />
+              <span>Cancel</span>
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Tabs */}
       <div style={{ display: 'flex', borderBottom: '1px solid var(--ds-border)', marginBottom: 20, gap: 24, overflowX: 'auto' }}>
         <button
@@ -272,7 +559,7 @@ function DocumentDetailsContent({ params }: { params: Promise<{ id: string }> })
           <Layers size={16} />
           <span>Extracted Fields</span>
           <span style={{ fontSize: '0.72rem', padding: '1px 6px', borderRadius: 10, background: 'var(--ds-bg)', color: 'var(--ds-text-secondary)' }}>
-            {fields.length}
+            {currentFields.length}
           </span>
         </button>
 
@@ -296,7 +583,7 @@ function DocumentDetailsContent({ params }: { params: Promise<{ id: string }> })
           <FileCheck size={16} />
           <span>Line Items</span>
           <span style={{ fontSize: '0.72rem', padding: '1px 6px', borderRadius: 10, background: 'var(--ds-bg)', color: 'var(--ds-text-secondary)' }}>
-            {lineItems.length}
+            {currentLineItems.length}
           </span>
         </button>
 
@@ -351,108 +638,468 @@ function DocumentDetailsContent({ params }: { params: Promise<{ id: string }> })
       {/* Tab 1: Extracted Fields Table */}
       {activeTab === 'fields' && (
         <div className="card" style={{ overflow: 'hidden' }}>
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              padding: '14px 20px',
+              borderBottom: '1px solid var(--ds-border)',
+              background: isEditing ? 'rgba(13, 148, 136, 0.04)' : 'transparent',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <Layers size={18} color="var(--ds-teal-500)" />
+              <h2 style={{ fontSize: '0.95rem', fontWeight: 600, color: 'var(--ds-text-primary)', margin: 0 }}>
+                {isEditing ? `Editing Extracted Fields (${editFields.length} rows)` : `Extracted Fields & Key Attributes (${fields.length})`}
+              </h2>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              {isEditing ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={handleAddField}
+                    className="btn btn-secondary btn-sm"
+                    style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+                  >
+                    <Plus size={14} />
+                    <span>Add Row</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleSaveChanges}
+                    className="btn btn-primary btn-sm"
+                    disabled={isSaving}
+                    style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+                  >
+                    {isSaving ? <RefreshCw size={14} className="spin" /> : <Save size={14} />}
+                    <span>Save Table</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleCancelEditing}
+                    className="btn btn-secondary btn-sm"
+                    disabled={isSaving}
+                  >
+                    <X size={14} />
+                    <span>Cancel</span>
+                  </button>
+                </>
+              ) : (
+                <button
+                  type="button"
+                  onClick={handleStartEditing}
+                  className="btn btn-secondary btn-sm"
+                  style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+                >
+                  <Edit3 size={14} color="var(--ds-teal-500)" />
+                  <span>Edit Table Format</span>
+                </button>
+              )}
+            </div>
+          </div>
+
           <div className="table-container">
             <table className="table">
               <thead>
                 <tr>
-                  <th>Field Name</th>
-                  <th>Extracted Value</th>
-                  <th>Data Type</th>
-                  <th>AI Confidence</th>
-                  <th>Page</th>
-                  <th>Source Evidence Text</th>
+                  <th style={{ width: isEditing ? '22%' : '20%' }}>Field Name</th>
+                  <th style={{ width: isEditing ? '25%' : '24%' }}>Extracted Value</th>
+                  <th style={{ width: isEditing ? '14%' : '12%' }}>Data Type</th>
+                  <th style={{ width: isEditing ? '12%' : '12%' }}>AI Confidence</th>
+                  <th style={{ width: isEditing ? '9%' : '8%' }}>Page</th>
+                  <th style={{ width: isEditing ? '20%' : '24%' }}>Source Evidence Text</th>
+                  {isEditing && <th style={{ width: '6%', textAlign: 'center' }}>Action</th>}
                 </tr>
               </thead>
               <tbody>
-                {fields.length === 0 ? (
+                {currentFields.length === 0 ? (
                   <tr>
-                    <td colSpan={6} style={{ textAlign: 'center', padding: '40px 20px', color: 'var(--ds-text-muted)' }}>
-                      No fields extracted yet. Click &ldquo;Re-extract with AI&rdquo; to analyze this document.
+                    <td colSpan={isEditing ? 7 : 6} style={{ textAlign: 'center', padding: '40px 20px', color: 'var(--ds-text-muted)' }}>
+                      No fields found. {isEditing ? 'Click "Add Row" above to create a field.' : 'Click "Edit Table Format" to enter fields manually.'}
                     </td>
                   </tr>
                 ) : (
-                  fields.map((f) => (
-                    <tr key={f.id}>
-                      <td style={{ fontWeight: 600, color: 'var(--ds-text-primary)', textTransform: 'capitalize' }}>
-                        {f.field_name.replace(/_/g, ' ')}
-                      </td>
-                      <td style={{ fontWeight: 600, color: 'var(--ds-teal-500)' }}>
-                        {f.field_value || <span style={{ color: 'var(--ds-text-muted)' }}>—</span>}
-                      </td>
-                      <td>
-                        <span style={{ fontSize: '0.75rem', padding: '2px 8px', borderRadius: 4, background: 'var(--ds-bg)' }}>
-                          {f.field_type}
-                        </span>
-                      </td>
-                      <td>
-                        {f.confidence !== null ? (
-                          <span
-                            className={`badge ${f.confidence > 0.9 ? 'badge-success' : f.confidence > 0.7 ? 'badge-warning' : 'badge-error'}`}
-                          >
-                            {(f.confidence * 100).toFixed(0)}%
-                          </span>
-                        ) : (
-                          '—'
-                        )}
-                      </td>
-                      <td style={{ fontSize: '0.8rem', color: 'var(--ds-text-muted)' }}>
-                        Page {f.source_page || 1}
-                      </td>
-                      <td style={{ fontSize: '0.8rem', color: 'var(--ds-text-secondary)', maxWidth: 280 }}>
-                        <code style={{ background: 'var(--ds-bg)', padding: '2px 6px', borderRadius: 4, fontSize: '0.75rem' }}>
-                          {f.source_text || 'Exact line match'}
-                        </code>
-                      </td>
+                  currentFields.map((f, index) => (
+                    <tr key={f.id || `field-idx-${index}`}>
+                      {isEditing ? (
+                        <>
+                          <td>
+                            <input
+                              className="table-edit-input"
+                              placeholder="e.g. invoice_number"
+                              value={f.field_name}
+                              onChange={(e) => handleUpdateField(index, 'field_name', e.target.value)}
+                              aria-label={`Field name row ${index + 1}`}
+                            />
+                          </td>
+                          <td>
+                            <input
+                              className="table-edit-input"
+                              style={{ fontWeight: 600, color: 'var(--ds-teal-500)' }}
+                              placeholder="Value..."
+                              value={f.field_value ?? ''}
+                              onChange={(e) => handleUpdateField(index, 'field_value', e.target.value)}
+                              aria-label={`Field value row ${index + 1}`}
+                            />
+                          </td>
+                          <td>
+                            <select
+                              className="table-edit-input"
+                              value={f.field_type}
+                              onChange={(e) => handleUpdateField(index, 'field_type', e.target.value)}
+                              aria-label={`Field type row ${index + 1}`}
+                            >
+                              <option value="string">string</option>
+                              <option value="currency">currency</option>
+                              <option value="date">date</option>
+                              <option value="number">number</option>
+                              <option value="vendor">vendor</option>
+                              <option value="id">id</option>
+                              <option value="tax_id">tax_id</option>
+                              <option value="terms">terms</option>
+                            </select>
+                          </td>
+                          <td>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                              <input
+                                type="number"
+                                min="0"
+                                max="100"
+                                className="table-edit-input"
+                                style={{ width: 60 }}
+                                value={Math.round((f.confidence ?? 1) * 100)}
+                                onChange={(e) => {
+                                  const val = parseFloat(e.target.value);
+                                  handleUpdateField(index, 'confidence', isNaN(val) ? 1.0 : val / 100);
+                                }}
+                                aria-label={`Confidence row ${index + 1}`}
+                              />
+                              <span style={{ fontSize: '0.75rem', color: 'var(--ds-text-muted)' }}>%</span>
+                            </div>
+                          </td>
+                          <td>
+                            <input
+                              type="number"
+                              min="1"
+                              className="table-edit-input"
+                              style={{ width: 55 }}
+                              value={f.source_page || 1}
+                              onChange={(e) => handleUpdateField(index, 'source_page', parseInt(e.target.value, 10) || 1)}
+                              aria-label={`Page row ${index + 1}`}
+                            />
+                          </td>
+                          <td>
+                            <input
+                              className="table-edit-input"
+                              placeholder="Direct line match or citation"
+                              value={f.source_text ?? ''}
+                              onChange={(e) => handleUpdateField(index, 'source_text', e.target.value)}
+                              aria-label={`Source evidence row ${index + 1}`}
+                            />
+                          </td>
+                          <td style={{ textAlign: 'center' }}>
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveField(index)}
+                              className="icon-btn"
+                              style={{ width: 30, height: 30, margin: '0 auto', color: 'var(--ds-error)' }}
+                              title="Delete row"
+                              aria-label={`Delete row ${index + 1}`}
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          </td>
+                        </>
+                      ) : (
+                        <>
+                          <td style={{ fontWeight: 600, color: 'var(--ds-text-primary)', textTransform: 'capitalize' }}>
+                            {f.field_name.replace(/_/g, ' ')}
+                          </td>
+                          <td style={{ fontWeight: 600, color: 'var(--ds-teal-500)' }}>
+                            {f.field_value || <span style={{ color: 'var(--ds-text-muted)' }}>—</span>}
+                          </td>
+                          <td>
+                            <span style={{ fontSize: '0.75rem', padding: '2px 8px', borderRadius: 4, background: 'var(--ds-bg)' }}>
+                              {f.field_type}
+                            </span>
+                          </td>
+                          <td>
+                            {f.confidence !== null ? (
+                              <span
+                                className={`badge ${f.confidence > 0.9 ? 'badge-success' : f.confidence > 0.7 ? 'badge-warning' : 'badge-error'}`}
+                              >
+                                {(f.confidence * 100).toFixed(0)}%
+                              </span>
+                            ) : (
+                              '—'
+                            )}
+                          </td>
+                          <td style={{ fontSize: '0.8rem', color: 'var(--ds-text-muted)' }}>
+                            Page {f.source_page || 1}
+                          </td>
+                          <td style={{ fontSize: '0.8rem', color: 'var(--ds-text-secondary)', maxWidth: 280 }}>
+                            <code style={{ background: 'var(--ds-bg)', padding: '2px 6px', borderRadius: 4, fontSize: '0.75rem' }}>
+                              {f.source_text || 'Exact line match'}
+                            </code>
+                          </td>
+                        </>
+                      )}
                     </tr>
                   ))
                 )}
               </tbody>
             </table>
           </div>
+
+          {isEditing && (
+            <div style={{ padding: '12px 20px', borderTop: '1px solid var(--ds-border)', background: 'var(--ds-surface)' }}>
+              <button
+                type="button"
+                onClick={handleAddField}
+                className="btn btn-secondary btn-sm"
+                style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+              >
+                <Plus size={14} />
+                <span>Add Extracted Field Row</span>
+              </button>
+            </div>
+          )}
         </div>
       )}
 
       {/* Tab 2: Line Items Table */}
       {activeTab === 'lineItems' && (
         <div className="card" style={{ overflow: 'hidden' }}>
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              padding: '14px 20px',
+              borderBottom: '1px solid var(--ds-border)',
+              background: isEditing ? 'rgba(13, 148, 136, 0.04)' : 'transparent',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <FileCheck size={18} color="var(--ds-teal-500)" />
+              <h2 style={{ fontSize: '0.95rem', fontWeight: 600, color: 'var(--ds-text-primary)', margin: 0 }}>
+                {isEditing ? `Editing Line Items (${editLineItems.length} items)` : `Discrete Line Items (${lineItems.length})`}
+              </h2>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              {isEditing ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={handleAddLineItem}
+                    className="btn btn-secondary btn-sm"
+                    style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+                  >
+                    <Plus size={14} />
+                    <span>Add Item</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleSaveChanges}
+                    className="btn btn-primary btn-sm"
+                    disabled={isSaving}
+                    style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+                  >
+                    {isSaving ? <RefreshCw size={14} className="spin" /> : <Save size={14} />}
+                    <span>Save Table</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleCancelEditing}
+                    className="btn btn-secondary btn-sm"
+                    disabled={isSaving}
+                  >
+                    <X size={14} />
+                    <span>Cancel</span>
+                  </button>
+                </>
+              ) : (
+                <button
+                  type="button"
+                  onClick={handleStartEditing}
+                  className="btn btn-secondary btn-sm"
+                  style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+                >
+                  <Edit3 size={14} color="var(--ds-teal-500)" />
+                  <span>Edit Table Format</span>
+                </button>
+              )}
+            </div>
+          </div>
+
           <div className="table-container">
             <table className="table">
               <thead>
                 <tr>
-                  <th>Item #</th>
-                  <th>Description</th>
-                  <th>Quantity</th>
-                  <th>Unit Price</th>
-                  <th>Amount</th>
-                  <th>Unit</th>
-                  <th>Page</th>
+                  <th style={{ width: isEditing ? '6%' : '8%' }}>Item #</th>
+                  <th style={{ width: isEditing ? '32%' : '32%' }}>Description</th>
+                  <th style={{ width: isEditing ? '12%' : '12%' }}>Quantity</th>
+                  <th style={{ width: isEditing ? '15%' : '16%' }}>Unit Price</th>
+                  <th style={{ width: isEditing ? '16%' : '16%' }}>Amount</th>
+                  <th style={{ width: isEditing ? '10%' : '10%' }}>Unit</th>
+                  <th style={{ width: isEditing ? '7%' : '6%' }}>Page</th>
+                  {isEditing && <th style={{ width: '6%', textAlign: 'center' }}>Action</th>}
                 </tr>
               </thead>
               <tbody>
-                {lineItems.length === 0 ? (
+                {currentLineItems.length === 0 ? (
                   <tr>
-                    <td colSpan={7} style={{ textAlign: 'center', padding: '40px 20px', color: 'var(--ds-text-muted)' }}>
-                      No discrete line items detected for this document category.
+                    <td colSpan={isEditing ? 8 : 7} style={{ textAlign: 'center', padding: '40px 20px', color: 'var(--ds-text-muted)' }}>
+                      No discrete line items detected. {isEditing ? 'Click "Add Item" above to add row.' : 'Click "Edit Table Format" to add items.'}
                     </td>
                   </tr>
                 ) : (
-                  lineItems.map((li) => (
-                    <tr key={li.id}>
-                      <td>{li.item_number || 1}</td>
-                      <td style={{ fontWeight: 600 }}>{li.description}</td>
-                      <td>{li.quantity}</td>
-                      <td>₹ {li.unit_price?.toLocaleString('en-IN')}</td>
-                      <td style={{ fontWeight: 600, color: 'var(--ds-text-primary)' }}>
-                        ₹ {li.amount?.toLocaleString('en-IN')}
-                      </td>
-                      <td>{li.unit || 'unit'}</td>
-                      <td>Page {li.source_page || 1}</td>
+                  currentLineItems.map((li, index) => (
+                    <tr key={li.id || `li-idx-${index}`}>
+                      {isEditing ? (
+                        <>
+                          <td>
+                            <input
+                              type="number"
+                              min="1"
+                              className="table-edit-input"
+                              style={{ width: 50 }}
+                              value={li.item_number || (index + 1)}
+                              onChange={(e) => handleUpdateLineItem(index, 'item_number', parseInt(e.target.value, 10) || (index + 1))}
+                              aria-label={`Line item number ${index + 1}`}
+                            />
+                          </td>
+                          <td>
+                            <input
+                              className="table-edit-input"
+                              style={{ fontWeight: 600 }}
+                              placeholder="Description..."
+                              value={li.description ?? ''}
+                              onChange={(e) => handleUpdateLineItem(index, 'description', e.target.value)}
+                              aria-label={`Description row ${index + 1}`}
+                            />
+                          </td>
+                          <td>
+                            <input
+                              type="number"
+                              step="any"
+                              className="table-edit-input"
+                              placeholder="Qty"
+                              value={li.quantity ?? ''}
+                              onChange={(e) => handleUpdateLineItem(index, 'quantity', e.target.value)}
+                              aria-label={`Quantity row ${index + 1}`}
+                            />
+                          </td>
+                          <td>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                              <span style={{ fontSize: '0.8rem', color: 'var(--ds-text-muted)' }}>₹</span>
+                              <input
+                                type="number"
+                                step="any"
+                                className="table-edit-input"
+                                placeholder="0.00"
+                                value={li.unit_price ?? ''}
+                                onChange={(e) => handleUpdateLineItem(index, 'unit_price', e.target.value)}
+                                aria-label={`Unit price row ${index + 1}`}
+                              />
+                            </div>
+                          </td>
+                          <td>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                              <span style={{ fontSize: '0.8rem', color: 'var(--ds-text-muted)' }}>₹</span>
+                              <input
+                                type="number"
+                                step="any"
+                                className="table-edit-input"
+                                style={{ fontWeight: 600, color: 'var(--ds-text-primary)' }}
+                                placeholder="0.00"
+                                value={li.amount ?? ''}
+                                onChange={(e) => handleUpdateLineItem(index, 'amount', parseFloat(e.target.value) || 0)}
+                                aria-label={`Amount row ${index + 1}`}
+                              />
+                            </div>
+                          </td>
+                          <td>
+                            <input
+                              className="table-edit-input"
+                              placeholder="unit"
+                              value={li.unit ?? 'unit'}
+                              onChange={(e) => handleUpdateLineItem(index, 'unit', e.target.value)}
+                              aria-label={`Unit row ${index + 1}`}
+                            />
+                          </td>
+                          <td>
+                            <input
+                              type="number"
+                              min="1"
+                              className="table-edit-input"
+                              style={{ width: 50 }}
+                              value={li.source_page || 1}
+                              onChange={(e) => handleUpdateLineItem(index, 'source_page', parseInt(e.target.value, 10) || 1)}
+                              aria-label={`Page row ${index + 1}`}
+                            />
+                          </td>
+                          <td style={{ textAlign: 'center' }}>
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveLineItem(index)}
+                              className="icon-btn"
+                              style={{ width: 30, height: 30, margin: '0 auto', color: 'var(--ds-error)' }}
+                              title="Delete line item"
+                              aria-label={`Delete line item ${index + 1}`}
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          </td>
+                        </>
+                      ) : (
+                        <>
+                          <td>{li.item_number || (index + 1)}</td>
+                          <td style={{ fontWeight: 600 }}>{li.description}</td>
+                          <td>{li.quantity}</td>
+                          <td>₹ {li.unit_price?.toLocaleString('en-IN')}</td>
+                          <td style={{ fontWeight: 600, color: 'var(--ds-text-primary)' }}>
+                            ₹ {li.amount?.toLocaleString('en-IN')}
+                          </td>
+                          <td>{li.unit || 'unit'}</td>
+                          <td>Page {li.source_page || 1}</td>
+                        </>
+                      )}
                     </tr>
                   ))
                 )}
               </tbody>
+              {currentLineItems.length > 0 && (
+                <tfoot>
+                  <tr style={{ background: 'var(--ds-bg)', fontWeight: 700 }}>
+                    <td colSpan={isEditing ? 4 : 4} style={{ textAlign: 'right', padding: '12px 16px', color: 'var(--ds-text-secondary)' }}>
+                      Total Line Items ({currentLineItems.length}):
+                    </td>
+                    <td style={{ padding: '12px 16px', color: 'var(--ds-teal-500)', fontSize: '0.95rem' }}>
+                      ₹ {lineItemsTotal.toLocaleString('en-IN')}
+                    </td>
+                    <td colSpan={isEditing ? 3 : 2}></td>
+                  </tr>
+                </tfoot>
+              )}
             </table>
           </div>
+
+          {isEditing && (
+            <div style={{ padding: '12px 20px', borderTop: '1px solid var(--ds-border)', background: 'var(--ds-surface)' }}>
+              <button
+                type="button"
+                onClick={handleAddLineItem}
+                className="btn btn-secondary btn-sm"
+                style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+              >
+                <Plus size={14} />
+                <span>Add Line Item Row</span>
+              </button>
+            </div>
+          )}
         </div>
       )}
 

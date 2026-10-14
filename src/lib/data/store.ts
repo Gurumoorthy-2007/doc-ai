@@ -364,6 +364,49 @@ export class DataStore {
     };
   }
 
+  static async updateDocumentFieldsApi(
+    documentId: string,
+    fields: ExtractedField[],
+    lineItems: LineItem[]
+  ): Promise<{ success: boolean; fields: ExtractedField[]; lineItems: LineItem[] }> {
+    try {
+      const res = await fetch(`/api/documents/${documentId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fields, lineItems }),
+      });
+      const data = await res.json();
+      if (res.ok && data.success && data.data) {
+        // Update local storage cache
+        const allFields = this.get<ExtractedField[]>(STORAGE_KEYS.EXTRACTED_FIELDS, INITIAL_EXTRACTED_FIELDS)
+          .filter((f) => f.document_id !== documentId);
+        this.set(STORAGE_KEYS.EXTRACTED_FIELDS, [...data.data.fields, ...allFields]);
+
+        const allItems = this.get<LineItem[]>(STORAGE_KEYS.LINE_ITEMS, INITIAL_LINE_ITEMS)
+          .filter((li) => li.document_id !== documentId);
+        this.set(STORAGE_KEYS.LINE_ITEMS, [...data.data.lineItems, ...allItems]);
+
+        return {
+          success: true,
+          fields: data.data.fields,
+          lineItems: data.data.lineItems,
+        };
+      }
+      throw new Error(data.error || 'Failed to update document data table');
+    } catch {
+      // Fallback local update
+      const allFields = this.get<ExtractedField[]>(STORAGE_KEYS.EXTRACTED_FIELDS, INITIAL_EXTRACTED_FIELDS)
+        .filter((f) => f.document_id !== documentId);
+      this.set(STORAGE_KEYS.EXTRACTED_FIELDS, [...fields, ...allFields]);
+
+      const allItems = this.get<LineItem[]>(STORAGE_KEYS.LINE_ITEMS, INITIAL_LINE_ITEMS)
+        .filter((li) => li.document_id !== documentId);
+      this.set(STORAGE_KEYS.LINE_ITEMS, [...lineItems, ...allItems]);
+
+      return { success: true, fields, lineItems };
+    }
+  }
+
   static async reprocessDocumentApi(id: string): Promise<Document | null> {
     try {
       const res = await fetch(`/api/documents/${id}/process`, { method: 'POST' });

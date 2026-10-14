@@ -306,3 +306,100 @@ test('Integration 11: Server Auth Module extracts and enforces trusted role', as
   assert.equal(checkDocumentOwnership(userB, docOfA), false);
   assert.equal(checkFindingOwnership(userB, findingOfA), false);
 });
+
+test('Integration 12: Editable Table Data Persistence for Extracted Fields & Line Items', async () => {
+  const docId = `doc-table-edit-${Date.now()}`;
+  await ServerPersistence.createDocument({
+    id: docId,
+    user_id: 'usr-demo-admin-001',
+    file_name: 'Table_Format_Edit_Test.pdf',
+    file_path: '/uploads/table_test.pdf',
+    file_size: 2048,
+    mime_type: 'application/pdf',
+    category: 'invoice',
+    classified_as: 'invoice',
+    status: 'completed',
+    page_count: 1,
+    processing_started_at: new Date().toISOString(),
+    processing_completed_at: new Date().toISOString(),
+    processing_error: null,
+    processing_attempts: 1,
+    file_hash: `hash-table-edit-${Date.now()}`,
+  });
+
+  const editedFields = [
+    {
+      id: `fld-${docId}-1`,
+      document_id: docId,
+      field_name: 'invoice_number',
+      field_value: 'INV-TABLE-999',
+      field_type: 'string',
+      confidence: 1.0,
+      is_missing: false,
+      is_ambiguous: false,
+      source_text: 'Manual table entry INV-TABLE-999',
+      source_page: 1,
+      created_at: new Date().toISOString(),
+    },
+    {
+      id: `fld-${docId}-2`,
+      document_id: docId,
+      field_name: 'total_amount',
+      field_value: '150000',
+      field_type: 'currency',
+      confidence: 0.98,
+      is_missing: false,
+      is_ambiguous: false,
+      source_text: 'Total: 150000',
+      source_page: 1,
+      created_at: new Date().toISOString(),
+    },
+  ];
+
+  const editedLineItems = [
+    {
+      id: `li-${docId}-1`,
+      document_id: docId,
+      item_number: 1,
+      description: 'Cloud Infrastructure Consulting',
+      quantity: 10,
+      unit_price: 10000,
+      amount: 100000,
+      unit: 'hrs',
+      source_page: 1,
+      created_at: new Date().toISOString(),
+    },
+    {
+      id: `li-${docId}-2`,
+      document_id: docId,
+      item_number: 2,
+      description: 'Security & Compliance Review',
+      quantity: 5,
+      unit_price: 10000,
+      amount: 50000,
+      unit: 'hrs',
+      source_page: 1,
+      created_at: new Date().toISOString(),
+    },
+  ];
+
+  // Save table format updates
+  await ServerPersistence.saveExtractedFields(docId, editedFields);
+  await ServerPersistence.saveLineItems(docId, editedLineItems);
+
+  // Retrieve and verify
+  const retrievedFields = await ServerPersistence.getExtractedFields(docId);
+  const retrievedLineItems = await ServerPersistence.getLineItems(docId);
+
+  assert.equal(retrievedFields.length, 2, 'Should persist 2 extracted fields');
+  assert.equal(retrievedFields.find((f) => f.field_name === 'invoice_number')?.field_value, 'INV-TABLE-999');
+  assert.equal(retrievedFields.find((f) => f.field_name === 'total_amount')?.field_value, '150000');
+
+  assert.equal(retrievedLineItems.length, 2, 'Should persist 2 line items');
+  const sum = retrievedLineItems.reduce((acc, li) => acc + (li.amount || 0), 0);
+  assert.equal(sum, 150000, 'Calculated total line item sum should equal 150000');
+
+  // Clean up
+  await ServerPersistence.deleteDocument(docId);
+});
+
