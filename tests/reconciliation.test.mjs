@@ -381,3 +381,149 @@ test('Rule 16: Invoice Date Predating Purchase Order Flagging', () => {
   assert.ok(predateFinding, 'Invoice predating purchase order must be detected');
 });
 
+test('Rule 17: Contract Reference Verification on PO and Invoice', () => {
+  const contract = {
+    id: 'ctr-ref-test',
+    category: 'contract',
+    fields: {
+      contract_number: { field_name: 'contract_number', field_value: 'CTR-CORP-900', field_type: 'string', confidence: 1, is_missing: false, is_ambiguous: false, source_text: 'CTR-CORP-900', source_page: 1, id: '1', document_id: 'ctr-ref-test', created_at: '' },
+      supplier_name: { field_name: 'supplier_name', field_value: 'Apex Solutions', field_type: 'string', confidence: 1, is_missing: false, is_ambiguous: false, source_text: 'Apex Solutions', source_page: 1, id: '2', document_id: 'ctr-ref-test', created_at: '' },
+      contract_value: { field_name: 'contract_value', field_value: '500000', field_type: 'number', confidence: 1, is_missing: false, is_ambiguous: false, source_text: '500000', source_page: 1, id: '3', document_id: 'ctr-ref-test', created_at: '' },
+    },
+    lineItems: [],
+  };
+
+  const po = {
+    id: 'po-ref-test',
+    category: 'purchase_order',
+    fields: {
+      po_number: { field_name: 'po_number', field_value: 'PO-900', field_type: 'string', confidence: 1, is_missing: false, is_ambiguous: false, source_text: 'PO-900', source_page: 1, id: '4', document_id: 'po-ref-test', created_at: '' },
+      supplier_name: { field_name: 'supplier_name', field_value: 'Apex Solutions', field_type: 'string', confidence: 1, is_missing: false, is_ambiguous: false, source_text: 'Apex Solutions', source_page: 1, id: '5', document_id: 'po-ref-test', created_at: '' },
+      total: { field_name: 'total', field_value: '200000', field_type: 'number', confidence: 1, is_missing: false, is_ambiguous: false, source_text: '200000', source_page: 1, id: '6', document_id: 'po-ref-test', created_at: '' },
+      contract_reference: { field_name: 'contract_reference', field_value: 'CTR-WRONG-111', field_type: 'string', confidence: 1, is_missing: false, is_ambiguous: false, source_text: 'CTR-WRONG-111', source_page: 1, id: '7', document_id: 'po-ref-test', created_at: '' },
+    },
+    lineItems: [],
+  };
+
+  const result = reconcileDocuments(contract, po, null);
+  const contractRefFinding = result.findings.find((f) => f.rule_id === 'RULE_CONTRACT_REF_MISMATCH');
+  assert.ok(contractRefFinding, 'Contract reference mismatch must be detected');
+  assert.equal(contractRefFinding.severity, 'high');
+});
+
+test('Rule 18: Conflicting Payment Terms (Contract vs Invoice)', () => {
+  const contract = {
+    id: 'ctr-terms-test',
+    category: 'contract',
+    fields: {
+      contract_number: { field_name: 'contract_number', field_value: 'CTR-100', field_type: 'string', confidence: 1, is_missing: false, is_ambiguous: false, source_text: 'CTR-100', source_page: 1, id: '1', document_id: 'ctr-terms-test', created_at: '' },
+      supplier_name: { field_name: 'supplier_name', field_value: 'Zenith Logistics', field_type: 'string', confidence: 1, is_missing: false, is_ambiguous: false, source_text: 'Zenith Logistics', source_page: 1, id: '2', document_id: 'ctr-terms-test', created_at: '' },
+      contract_value: { field_name: 'contract_value', field_value: '300000', field_type: 'number', confidence: 1, is_missing: false, is_ambiguous: false, source_text: '300000', source_page: 1, id: '3', document_id: 'ctr-terms-test', created_at: '' },
+      payment_terms: { field_name: 'payment_terms', field_value: 'Net 60 Days', field_type: 'string', confidence: 1, is_missing: false, is_ambiguous: false, source_text: 'Net 60 Days', source_page: 1, id: '4', document_id: 'ctr-terms-test', created_at: '' },
+    },
+    lineItems: [],
+  };
+
+  const invoice = {
+    id: 'inv-terms-test',
+    category: 'invoice',
+    fields: {
+      invoice_number: { field_name: 'invoice_number', field_value: 'INV-100', field_type: 'string', confidence: 1, is_missing: false, is_ambiguous: false, source_text: 'INV-100', source_page: 1, id: '5', document_id: 'inv-terms-test', created_at: '' },
+      supplier_name: { field_name: 'supplier_name', field_value: 'Zenith Logistics', field_type: 'string', confidence: 1, is_missing: false, is_ambiguous: false, source_text: 'Zenith Logistics', source_page: 1, id: '6', document_id: 'inv-terms-test', created_at: '' },
+      total: { field_name: 'total', field_value: '50000', field_type: 'number', confidence: 1, is_missing: false, is_ambiguous: false, source_text: '50000', source_page: 1, id: '7', document_id: 'inv-terms-test', created_at: '' },
+      payment_terms: { field_name: 'payment_terms', field_value: 'Due Upon Receipt', field_type: 'string', confidence: 1, is_missing: false, is_ambiguous: false, source_text: 'Due Upon Receipt', source_page: 1, id: '8', document_id: 'inv-terms-test', created_at: '' },
+    },
+    lineItems: [],
+  };
+
+  const result = reconcileDocuments(contract, null, invoice);
+  const termsFinding = result.findings.find((f) => f.rule_id === 'RULE_PAYMENT_TERMS_MISMATCH');
+  assert.ok(termsFinding, 'Payment terms conflict must be flagged');
+  assert.equal(termsFinding.severity, 'high');
+});
+
+test('Rule 19: Customer Name Mismatch (PO vs Invoice)', () => {
+  const po = {
+    id: 'po-cust-test',
+    category: 'purchase_order',
+    fields: {
+      po_number: { field_name: 'po_number', field_value: 'PO-200', field_type: 'string', confidence: 1, is_missing: false, is_ambiguous: false, source_text: 'PO-200', source_page: 1, id: '1', document_id: 'po-cust-test', created_at: '' },
+      supplier_name: { field_name: 'supplier_name', field_value: 'Metro Supplies', field_type: 'string', confidence: 1, is_missing: false, is_ambiguous: false, source_text: 'Metro Supplies', source_page: 1, id: '2', document_id: 'po-cust-test', created_at: '' },
+      customer_name: { field_name: 'customer_name', field_value: 'Acme Corporation India', field_type: 'string', confidence: 1, is_missing: false, is_ambiguous: false, source_text: 'Acme Corporation India', source_page: 1, id: '3', document_id: 'po-cust-test', created_at: '' },
+      total: { field_name: 'total', field_value: '40000', field_type: 'number', confidence: 1, is_missing: false, is_ambiguous: false, source_text: '40000', source_page: 1, id: '4', document_id: 'po-cust-test', created_at: '' },
+    },
+    lineItems: [],
+  };
+
+  const invoice = {
+    id: 'inv-cust-test',
+    category: 'invoice',
+    fields: {
+      invoice_number: { field_name: 'invoice_number', field_value: 'INV-200', field_type: 'string', confidence: 1, is_missing: false, is_ambiguous: false, source_text: 'INV-200', source_page: 1, id: '5', document_id: 'inv-cust-test', created_at: '' },
+      supplier_name: { field_name: 'supplier_name', field_value: 'Metro Supplies', field_type: 'string', confidence: 1, is_missing: false, is_ambiguous: false, source_text: 'Metro Supplies', source_page: 1, id: '6', document_id: 'inv-cust-test', created_at: '' },
+      customer_name: { field_name: 'customer_name', field_value: 'Global Beta Enterprises', field_type: 'string', confidence: 1, is_missing: false, is_ambiguous: false, source_text: 'Global Beta Enterprises', source_page: 1, id: '7', document_id: 'inv-cust-test', created_at: '' },
+      total: { field_name: 'total', field_value: '40000', field_type: 'number', confidence: 1, is_missing: false, is_ambiguous: false, source_text: '40000', source_page: 1, id: '8', document_id: 'inv-cust-test', created_at: '' },
+    },
+    lineItems: [],
+  };
+
+  const result = reconcileDocuments(null, po, invoice);
+  const custFinding = result.findings.find((f) => f.rule_id === 'RULE_CUSTOMER_MISMATCH');
+  assert.ok(custFinding, 'Customer name mismatch must be detected');
+});
+
+test('Rule 20: Agreed Purchase Order Discount Not Applied on Invoice', () => {
+  const po = {
+    id: 'po-disc-test',
+    category: 'purchase_order',
+    fields: {
+      po_number: { field_name: 'po_number', field_value: 'PO-300', field_type: 'string', confidence: 1, is_missing: false, is_ambiguous: false, source_text: 'PO-300', source_page: 1, id: '1', document_id: 'po-disc-test', created_at: '' },
+      supplier_name: { field_name: 'supplier_name', field_value: 'Office World', field_type: 'string', confidence: 1, is_missing: false, is_ambiguous: false, source_text: 'Office World', source_page: 1, id: '2', document_id: 'po-disc-test', created_at: '' },
+      discount: { field_name: 'discount', field_value: '5000', field_type: 'number', confidence: 1, is_missing: false, is_ambiguous: false, source_text: '₹ 5,000 discount', source_page: 1, id: '3', document_id: 'po-disc-test', created_at: '' },
+      total: { field_name: 'total', field_value: '45000', field_type: 'number', confidence: 1, is_missing: false, is_ambiguous: false, source_text: '45000', source_page: 1, id: '4', document_id: 'po-disc-test', created_at: '' },
+    },
+    lineItems: [],
+  };
+
+  const invoice = {
+    id: 'inv-disc-test',
+    category: 'invoice',
+    fields: {
+      invoice_number: { field_name: 'invoice_number', field_value: 'INV-300', field_type: 'string', confidence: 1, is_missing: false, is_ambiguous: false, source_text: 'INV-300', source_page: 1, id: '5', document_id: 'inv-disc-test', created_at: '' },
+      supplier_name: { field_name: 'supplier_name', field_value: 'Office World', field_type: 'string', confidence: 1, is_missing: false, is_ambiguous: false, source_text: 'Office World', source_page: 1, id: '6', document_id: 'inv-disc-test', created_at: '' },
+      discount: { field_name: 'discount', field_value: '0', field_type: 'number', confidence: 1, is_missing: false, is_ambiguous: false, source_text: '₹ 0 discount', source_page: 1, id: '7', document_id: 'inv-disc-test', created_at: '' },
+      total: { field_name: 'total', field_value: '50000', field_type: 'number', confidence: 1, is_missing: false, is_ambiguous: false, source_text: '50000', source_page: 1, id: '8', document_id: 'inv-disc-test', created_at: '' },
+    },
+    lineItems: [],
+  };
+
+  const result = reconcileDocuments(null, po, invoice);
+  const discFinding = result.findings.find((f) => f.rule_id === 'RULE_DISCOUNT_DISCREPANCY');
+  assert.ok(discFinding, 'Discount discrepancy must be detected');
+  assert.equal(discFinding.variance, 5000);
+});
+
+test('Rule 21: Multi-Parameter Duplicate Invoice Collision Check', () => {
+  const existingInvoices = [
+    {
+      id: 'doc-inv-prior',
+      number: 'INV-7889',
+      supplier: 'Acme Cloud Technologies',
+      total: 82500,
+      date: '2025-05-10',
+    },
+  ];
+
+  const currentInvoice = {
+    id: 'doc-inv-current',
+    number: 'INV-7889-TYPO',
+    supplier: 'Acme Cloud Technologies Ltd',
+    total: 82500,
+    date: '2025-05-10',
+  };
+
+  const finding = checkDuplicateInvoice(currentInvoice, existingInvoices, 'doc-inv-current');
+  assert.ok(finding, 'Heuristic multi-parameter collision must be detected');
+  assert.equal(finding.rule_id, 'RULE_DUP_INVOICE_HEURISTIC');
+});
+

@@ -159,51 +159,98 @@ export function calculateVariance(
   return invoiceTotal - poTotal;
 }
 
+export interface DuplicateCandidate {
+  id: string;
+  number?: string | null;
+  supplier?: string | null;
+  total?: number | null;
+  date?: string | null;
+}
+
 export function checkDuplicateInvoice(
-  invoiceNumber: string | null | undefined,
-  existingInvoiceNumbers: Array<{ id: string; number: string }>,
-  currentDocId: string
+  target: string | DuplicateCandidate | null | undefined,
+  existingInvoices: Array<DuplicateCandidate | { id: string; number: string }>,
+  currentDocId?: string
 ): Omit<Finding, 'id' | 'user_id' | 'created_at' | 'updated_at'> | null {
-  if (!invoiceNumber) return null;
-  const normalizedTarget = normalizeString(invoiceNumber);
-  if (!normalizedTarget) return null;
+  if (!target) return null;
 
-  const dup = existingInvoiceNumbers.find(
-    (inv) => normalizeString(inv.number) === normalizedTarget && inv.id !== currentDocId
-  );
+  const targetDocId = typeof target === 'string' ? (currentDocId || '') : (target.id || currentDocId || '');
+  const targetNumber = typeof target === 'string' ? target : (target.number || null);
+  const targetSupplier = typeof target === 'object' && target !== null ? target.supplier : null;
+  const targetTotal = typeof target === 'object' && target !== null ? target.total : null;
+  const targetDate = typeof target === 'object' && target !== null ? target.date : null;
 
-  if (!dup) return null;
+  const normalizedTargetNum = normalizeString(targetNumber);
 
-  return {
-    reconciliation_group_id: null,
-    finding_type: 'duplicate_invoice',
-    severity: 'critical',
-    status: 'open',
-    title: 'Duplicate invoice detected',
-    description: `Invoice number "${invoiceNumber}" matches previously processed invoice in document ${dup.id}.`,
-    reason: `Duplicate invoice detection rule triggered: identical invoice number "${invoiceNumber}" found across separate documents.`,
-    source_document_id: currentDocId,
-    compared_document_id: dup.id,
-    source_value: invoiceNumber,
-    compared_value: dup.number,
-    financial_impact: null,
-    currency: null,
-    source_field: 'invoice_number',
-    source_page: 1,
-    source_text: `Invoice #${invoiceNumber}`,
-    compared_field: 'invoice_number',
-    compared_page: 1,
-    compared_text: `Invoice #${dup.number}`,
-    reviewed_by: null,
-    reviewed_at: null,
-    source_document: null,
-    compared_document: null,
-    reconciliation_group: null,
-    reviewer: null,
-  };
+  // 1. Direct Invoice Number Match
+  if (normalizedTargetNum) {
+    const dup = existingInvoices.find((inv) => {
+      const invNum = 'number' in inv ? inv.number : null;
+      return normalizeString(invNum) === normalizedTargetNum && inv.id !== targetDocId;
+    });
+
+    if (dup) {
+      const dupNum = 'number' in dup ? dup.number : targetNumber;
+      return makeFinding({
+        rule_id: 'RULE_DUP_INVOICE_NUMBER',
+        finding_type: 'duplicate_invoice',
+        severity: 'critical',
+        title: 'Duplicate invoice detected',
+        description: `Invoice number "${targetNumber}" matches previously processed invoice in document ${dup.id}.`,
+        reason: `Duplicate invoice detection rule triggered: identical invoice number "${targetNumber}" found across separate documents.`,
+        source_document_id: targetDocId,
+        compared_document_id: dup.id,
+        source_value: targetNumber,
+        compared_value: dupNum ?? null,
+        variance: 0,
+        calculation_method: 'Exact identifier matching: Normalized(Invoice Number A) == Normalized(Invoice Number B)',
+        source_field: 'invoice_number',
+        source_page: 1,
+        source_text: `Invoice #${targetNumber}`,
+        compared_field: 'invoice_number',
+        compared_page: 1,
+        compared_text: `Invoice #${dupNum}`,
+      });
+    }
+  }
+
+  // 2. Multi-parameter heuristic collision (Same supplier, same total amount, same invoice date)
+  if (targetSupplier && targetTotal !== null && targetTotal !== undefined && targetDate) {
+    const candidateDup = existingInvoices.find((inv) => {
+      if (inv.id === targetDocId) return false;
+      const c = inv as DuplicateCandidate;
+      if (!c.supplier || c.total === null || c.total === undefined || !c.date) return false;
+      const sameSupplier = compareSupplierNames(c.supplier, targetSupplier) === 'MATCH';
+      const sameTotal = compareNumeric(c.total, targetTotal) === 'MATCH';
+      const sameDate = normalizeString(c.date) === normalizeString(targetDate);
+      return sameSupplier && sameTotal && sameDate;
+    }) as DuplicateCandidate | undefined;
+
+    if (candidateDup) {
+      return makeFinding({
+        rule_id: 'RULE_DUP_INVOICE_HEURISTIC',
+        finding_type: 'duplicate_invoice',
+        severity: 'high',
+        title: 'Potential duplicate invoice (Amount, Supplier & Date collision)',
+        description: `Invoice from supplier "${targetSupplier}" for amount ${targetTotal} on ${targetDate} matches existing document ${candidateDup.id}.`,
+        reason: 'Deterministic collision check: Invoices from identical supplier with identical amounts and dates indicate probable duplicate billing.',
+        source_document_id: targetDocId,
+        compared_document_id: candidateDup.id,
+        source_value: `${targetSupplier} | ${targetTotal} | ${targetDate}`,
+        compared_value: `${candidateDup.supplier} | ${candidateDup.total} | ${candidateDup.date}`,
+        variance: 0,
+        calculation_method: 'Multi-parameter composite collision: (Supplier Match && Amount Match && Date Match)',
+        source_field: 'total',
+        compared_field: 'total',
+      });
+    }
+  }
+
+  return null;
 }
 
 function makeFinding(params: {
+  rule_id?: string | null;
   finding_type: FindingType;
   severity: FindingSeverity;
   title: string;
@@ -213,8 +260,10 @@ function makeFinding(params: {
   compared_document_id: string | null;
   source_value: string | null;
   compared_value: string | null;
+  variance?: number | null;
   financial_impact?: number | null;
   currency?: string | null;
+  calculation_method?: string | null;
   source_field?: string | null;
   source_page?: number | null;
   source_text?: string | null;
@@ -224,6 +273,7 @@ function makeFinding(params: {
   reconciliation_group_id?: string | null;
 }): Omit<Finding, 'id' | 'user_id' | 'created_at' | 'updated_at'> {
   return {
+    rule_id: params.rule_id ?? null,
     reconciliation_group_id: params.reconciliation_group_id ?? null,
     finding_type: params.finding_type,
     severity: params.severity,
@@ -235,8 +285,10 @@ function makeFinding(params: {
     compared_document_id: params.compared_document_id,
     source_value: params.source_value,
     compared_value: params.compared_value,
+    variance: params.variance ?? (params.financial_impact !== undefined ? params.financial_impact : null),
     financial_impact: params.financial_impact ?? null,
     currency: params.currency ?? null,
+    calculation_method: params.calculation_method ?? 'Deterministic comparison rule',
     source_field: params.source_field ?? null,
     source_page: params.source_page ?? null,
     source_text: params.source_text ?? null,
@@ -245,6 +297,10 @@ function makeFinding(params: {
     compared_text: params.compared_text ?? null,
     reviewed_by: null,
     reviewed_at: null,
+    is_reviewed: false,
+    review_decision: null,
+    review_comments: null,
+    decision_history: [],
     source_document: null,
     compared_document: null,
     reconciliation_group: null,
@@ -286,6 +342,7 @@ export function reconcileDocuments(
     overallStatus = 'missing_po';
     findings.push(
       makeFinding({
+        rule_id: 'RULE_MISSING_PO',
         finding_type: 'missing_field',
         severity: 'high',
         title: 'Missing Purchase Order',
@@ -296,7 +353,9 @@ export function reconcileDocuments(
         source_value: getFieldValue(invoice.fields, 'po_reference'),
         compared_value: null,
         financial_impact: invoiceTotal,
+        variance: invoiceTotal,
         currency,
+        calculation_method: 'Unmatched document check: invoice lacks linked purchase order authorization',
         source_field: 'po_reference',
         reconciliation_group_id: reconGroupId,
       })
@@ -320,6 +379,7 @@ export function reconcileDocuments(
     const currencyList = presentCurrencies.map((c) => `${c.type}: ${c.curr}`).join(', ');
     findings.push(
       makeFinding({
+        rule_id: 'RULE_CURRENCY_MISMATCH',
         finding_type: 'currency_mismatch',
         severity: 'critical',
         title: 'Currency mismatch across documents',
@@ -330,6 +390,7 @@ export function reconcileDocuments(
         source_value: invoiceCurrency || poCurrency || null,
         compared_value: contractCurrency || poCurrency || null,
         currency: null,
+        calculation_method: 'Multi-document currency code validation: Set(extracted currencies).size > 1',
         reconciliation_group_id: reconGroupId,
       })
     );
@@ -395,6 +456,7 @@ export function reconcileDocuments(
       overallStatus = 'discrepancy';
       findings.push(
         makeFinding({
+          rule_id: 'RULE_SUPPLIER_MISMATCH',
           finding_type: 'supplier_mismatch',
           severity: 'high',
           title: `Supplier name mismatch (${pair.typeA} vs ${pair.typeB})`,
@@ -406,6 +468,7 @@ export function reconcileDocuments(
           compared_value: pair.nameA,
           source_field: 'supplier_name',
           compared_field: 'supplier_name',
+          calculation_method: 'Token Jaccard similarity and legal suffix normalization',
           source_text: pair.idB && invoice?.id === pair.idB ? invoice.fields['supplier_name']?.source_text : null,
           compared_text: pair.idA && purchaseOrder?.id === pair.idA ? purchaseOrder.fields['supplier_name']?.source_text : null,
           reconciliation_group_id: reconGroupId,
@@ -431,6 +494,7 @@ export function reconcileDocuments(
         // Positive variance: Invoice exceeds PO
         findings.push(
           makeFinding({
+            rule_id: 'RULE_INVOICE_EXCEEDS_PO',
             finding_type: 'exceeds_po_amount',
             severity: 'critical',
             title: 'Invoice exceeds PO amount',
@@ -441,7 +505,9 @@ export function reconcileDocuments(
             source_value: invoiceTotal.toString(),
             compared_value: poTotal.toString(),
             financial_impact: variance,
+            variance,
             currency,
+            calculation_method: 'Variance = Invoice Stated Total - Approved PO Total',
             source_field: 'total',
             compared_field: 'total',
             source_page: invoice?.fields['total']?.source_page ?? 1,
@@ -455,6 +521,7 @@ export function reconcileDocuments(
         // Negative variance: Invoiced less than PO (underbilling)
         findings.push(
           makeFinding({
+            rule_id: 'RULE_INVOICE_UNDER_PO',
             finding_type: 'amount_mismatch',
             severity: 'medium',
             title: 'Invoice amount less than PO',
@@ -465,7 +532,9 @@ export function reconcileDocuments(
             source_value: invoiceTotal.toString(),
             compared_value: poTotal.toString(),
             financial_impact: Math.abs(variance),
+            variance,
             currency,
+            calculation_method: 'Variance = Invoice Stated Total - Approved PO Total',
             source_field: 'total',
             compared_field: 'total',
             reconciliation_group_id: reconGroupId,
@@ -482,6 +551,7 @@ export function reconcileDocuments(
       const contractVariance = poTotal - contractValue;
       findings.push(
         makeFinding({
+          rule_id: 'RULE_PO_EXCEEDS_CONTRACT',
           finding_type: 'exceeds_contract_value',
           severity: 'critical',
           title: 'PO exceeds contract commitment',
@@ -492,7 +562,9 @@ export function reconcileDocuments(
           source_value: poTotal.toString(),
           compared_value: contractValue.toString(),
           financial_impact: contractVariance,
+          variance: contractVariance,
           currency,
+          calculation_method: 'Variance = PO Stated Total - Master Contract Value Cap',
           source_field: 'total',
           compared_field: 'contract_value',
           reconciliation_group_id: reconGroupId,
@@ -507,6 +579,7 @@ export function reconcileDocuments(
       const overContract = invoiceTotal - contractValue;
       findings.push(
         makeFinding({
+          rule_id: 'RULE_INVOICE_EXCEEDS_CONTRACT',
           finding_type: 'exceeds_contract_value',
           severity: 'critical',
           title: 'Invoice exceeds contract maximum',
@@ -517,7 +590,9 @@ export function reconcileDocuments(
           source_value: invoiceTotal.toString(),
           compared_value: contractValue.toString(),
           financial_impact: overContract,
+          variance: overContract,
           currency,
+          calculation_method: 'Variance = Invoice Stated Total - Master Contract Value Cap',
           source_field: 'total',
           compared_field: 'contract_value',
           reconciliation_group_id: reconGroupId,
@@ -540,6 +615,7 @@ export function reconcileDocuments(
         const mathDiff = Math.abs(total - computedTotal);
         findings.push(
           makeFinding({
+            rule_id: 'RULE_ARITHMETIC_TAX_SUBTOTAL',
             finding_type: 'tax_discrepancy',
             severity: 'high',
             title: 'Invoice arithmetic variance (Subtotal + Tax ≠ Total)',
@@ -550,7 +626,9 @@ export function reconcileDocuments(
             source_value: total.toString(),
             compared_value: computedTotal.toFixed(2),
             financial_impact: mathDiff,
+            variance: total - computedTotal,
             currency,
+            calculation_method: 'Variance = Stated Total - (Subtotal + Tax)',
             source_field: 'total',
             compared_field: 'subtotal+tax',
             reconciliation_group_id: reconGroupId,
@@ -570,6 +648,7 @@ export function reconcileDocuments(
       if (!poItem && invItem) {
         findings.push(
           makeFinding({
+            rule_id: 'RULE_LINE_ITEM_UNAPPROVED',
             finding_type: 'quantity_discrepancy',
             severity: 'medium',
             title: `Unapproved line item #${i + 1}`,
@@ -580,7 +659,9 @@ export function reconcileDocuments(
             source_value: invItem.description ?? `Item ${i + 1}`,
             compared_value: null,
             financial_impact: invItem.amount,
+            variance: invItem.amount,
             currency,
+            calculation_method: 'Line item billed without matching authorized PO item',
             reconciliation_group_id: reconGroupId,
           })
         );
@@ -593,8 +674,11 @@ export function reconcileDocuments(
         if (poItem.quantity !== null && invItem.quantity !== null) {
           const qCmp = compareNumeric(poItem.quantity, invItem.quantity, 0);
           if (qCmp === 'MISMATCH') {
+            const qtyVariance = invItem.quantity - poItem.quantity;
+            const finImpact = invItem.unit_price ? Math.abs(qtyVariance) * invItem.unit_price : null;
             findings.push(
               makeFinding({
+                rule_id: 'RULE_LINE_ITEM_QUANTITY',
                 finding_type: 'quantity_discrepancy',
                 severity: 'medium',
                 title: `Quantity discrepancy on line item #${i + 1}`,
@@ -604,8 +688,10 @@ export function reconcileDocuments(
                 compared_document_id: purchaseOrder.id,
                 source_value: invItem.quantity.toString(),
                 compared_value: poItem.quantity.toString(),
-                financial_impact: invItem.unit_price ? Math.abs(invItem.quantity - poItem.quantity) * invItem.unit_price : null,
+                financial_impact: finImpact,
+                variance: qtyVariance,
                 currency,
+                calculation_method: 'Variance = Invoice Quantity - PO Quantity; Impact = |Variance| * Unit Price',
                 source_field: `line_item_${i + 1}_quantity`,
                 compared_field: `line_item_${i + 1}_quantity`,
                 reconciliation_group_id: reconGroupId,
@@ -619,12 +705,14 @@ export function reconcileDocuments(
         if (poItem.unit_price !== null && invItem.unit_price !== null) {
           const pCmp = compareNumeric(poItem.unit_price, invItem.unit_price);
           if (pCmp === 'MISMATCH') {
+            const rateVariance = invItem.unit_price - poItem.unit_price;
             const priceVariance = invItem.quantity
-              ? Math.abs(invItem.unit_price - poItem.unit_price) * invItem.quantity
-              : Math.abs(invItem.unit_price - poItem.unit_price);
+              ? Math.abs(rateVariance) * invItem.quantity
+              : Math.abs(rateVariance);
 
             findings.push(
               makeFinding({
+                rule_id: 'RULE_LINE_ITEM_PRICE',
                 finding_type: 'unit_price_discrepancy',
                 severity: 'medium',
                 title: `Unit price discrepancy on line item #${i + 1}`,
@@ -635,7 +723,9 @@ export function reconcileDocuments(
                 source_value: invItem.unit_price.toString(),
                 compared_value: poItem.unit_price.toString(),
                 financial_impact: priceVariance,
+                variance: rateVariance,
                 currency,
+                calculation_method: 'Rate Variance = Invoice Unit Price - PO Unit Price; Impact = |Rate Variance| * Quantity',
                 source_field: `line_item_${i + 1}_unit_price`,
                 compared_field: `line_item_${i + 1}_unit_price`,
                 reconciliation_group_id: reconGroupId,
@@ -674,6 +764,7 @@ export function reconcileDocuments(
       if (!val || val.trim() === '') {
         findings.push(
           makeFinding({
+            rule_id: 'RULE_MANDATORY_FIELD_MISSING',
             finding_type: 'missing_field',
             severity: 'medium',
             title: `Missing ${field.replace(/_/g, ' ')}`,
@@ -683,6 +774,7 @@ export function reconcileDocuments(
             compared_document_id: null,
             source_value: null,
             compared_value: null,
+            calculation_method: 'Schema mandatory field presence validation',
             source_field: field,
             reconciliation_group_id: reconGroupId,
           })
@@ -702,6 +794,7 @@ export function reconcileDocuments(
         overallStatus = 'discrepancy';
         findings.push(
           makeFinding({
+            rule_id: 'RULE_PO_REF_MISMATCH',
             finding_type: 'missing_field',
             severity: 'high',
             title: 'PO reference mismatch on invoice',
@@ -711,6 +804,7 @@ export function reconcileDocuments(
             compared_document_id: purchaseOrder.id,
             source_value: invoicePoRef,
             compared_value: poNumber,
+            calculation_method: 'Normalized string match: Invoice PO Reference vs PO Number',
             source_field: 'po_reference',
             compared_field: 'po_number',
             reconciliation_group_id: reconGroupId,
@@ -720,6 +814,7 @@ export function reconcileDocuments(
     } else if (!invoicePoRef) {
       findings.push(
         makeFinding({
+          rule_id: 'RULE_PO_REF_MISSING',
           finding_type: 'missing_field',
           severity: 'medium',
           title: 'Missing PO reference on invoice',
@@ -729,6 +824,7 @@ export function reconcileDocuments(
           compared_document_id: purchaseOrder.id,
           source_value: null,
           compared_value: poNumber,
+          calculation_method: 'Presence check: Invoice po_reference is non-empty',
           source_field: 'po_reference',
           reconciliation_group_id: reconGroupId,
         })
@@ -748,6 +844,7 @@ export function reconcileDocuments(
         overallStatus = 'discrepancy';
         findings.push(
           makeFinding({
+            rule_id: 'RULE_DUE_DATE_CHRONOLOGY',
             finding_type: 'missing_field',
             severity: 'high',
             title: 'Due date precedes invoice date',
@@ -757,6 +854,7 @@ export function reconcileDocuments(
             compared_document_id: null,
             source_value: dueDateStr,
             compared_value: invDateStr,
+            calculation_method: 'Date comparison: Due Date < Issue Date',
             source_field: 'due_date',
             compared_field: 'invoice_date',
             reconciliation_group_id: reconGroupId,
@@ -774,6 +872,7 @@ export function reconcileDocuments(
           overallStatus = 'discrepancy';
           findings.push(
             makeFinding({
+              rule_id: 'RULE_INVOICE_PREDATES_PO',
               finding_type: 'missing_field',
               severity: 'high',
               title: 'Invoice predates purchase order',
@@ -783,12 +882,225 @@ export function reconcileDocuments(
               compared_document_id: purchaseOrder.id,
               source_value: invDateStr,
               compared_value: poDateStr,
+              calculation_method: 'Date comparison: Invoice Date < PO Order Date',
               source_field: 'invoice_date',
               compared_field: 'order_date',
               reconciliation_group_id: reconGroupId,
             })
           );
         }
+      }
+    }
+  }
+
+  // 11. Contract Reference Verification (PO & Invoice -> Contract)
+  if (contract) {
+    const contractNumber = getFieldValue(contract.fields, 'contract_number');
+    if (contractNumber) {
+      // Check PO contract reference
+      if (purchaseOrder) {
+        const poContractRef = getFieldValue(purchaseOrder.fields, 'contract_reference');
+        if (poContractRef) {
+          if (compareStrings(poContractRef, contractNumber) === 'MISMATCH') {
+            overallStatus = 'discrepancy';
+            findings.push(
+              makeFinding({
+                rule_id: 'RULE_CONTRACT_REF_MISMATCH',
+                finding_type: 'missing_field',
+                severity: 'high',
+                title: 'Contract reference mismatch on purchase order',
+                description: `Purchase order references contract "${poContractRef}", which does not match active agreement "${contractNumber}".`,
+                reason: 'Document link validation: Purchase order references an unauthorized or distinct agreement.',
+                source_document_id: purchaseOrder.id,
+                compared_document_id: contract.id,
+                source_value: poContractRef,
+                compared_value: contractNumber,
+                source_field: 'contract_reference',
+                compared_field: 'contract_number',
+                reconciliation_group_id: reconGroupId,
+              })
+            );
+          }
+        } else {
+          findings.push(
+            makeFinding({
+              rule_id: 'RULE_CONTRACT_REF_MISSING',
+              finding_type: 'missing_field',
+              severity: 'medium',
+              title: 'Missing contract reference on purchase order',
+              description: `Purchase order does not reference master agreement "${contractNumber}".`,
+              reason: 'Audit governance: Commitments under master agreement must explicitly cite contract number.',
+              source_document_id: purchaseOrder.id,
+              compared_document_id: contract.id,
+              source_value: null,
+              compared_value: contractNumber,
+              source_field: 'contract_reference',
+              compared_field: 'contract_number',
+              reconciliation_group_id: reconGroupId,
+            })
+          );
+        }
+      }
+
+      // Check Invoice contract reference
+      if (invoice) {
+        const invContractRef = getFieldValue(invoice.fields, 'contract_reference');
+        if (invContractRef && compareStrings(invContractRef, contractNumber) === 'MISMATCH') {
+          overallStatus = 'discrepancy';
+          findings.push(
+            makeFinding({
+              rule_id: 'RULE_CONTRACT_REF_MISMATCH',
+              finding_type: 'missing_field',
+              severity: 'high',
+              title: 'Contract reference mismatch on invoice',
+              description: `Invoice references contract "${invContractRef}", differing from active agreement "${contractNumber}".`,
+              reason: 'Audit control violation: Invoiced billing cites mismatched master agreement.',
+              source_document_id: invoice.id,
+              compared_document_id: contract.id,
+              source_value: invContractRef,
+              compared_value: contractNumber,
+              source_field: 'contract_reference',
+              compared_field: 'contract_number',
+              reconciliation_group_id: reconGroupId,
+            })
+          );
+        }
+      }
+    }
+  }
+
+  // 12. Conflicting Payment Terms
+  const contractPaymentTerms = contract ? getFieldValue(contract.fields, 'payment_terms') : null;
+  const poPaymentTerms = purchaseOrder ? getFieldValue(purchaseOrder.fields, 'payment_terms') : null;
+  const invoicePaymentTerms = invoice ? getFieldValue(invoice.fields, 'payment_terms') : null;
+
+  if (contractPaymentTerms && invoicePaymentTerms) {
+    if (normalizeString(contractPaymentTerms) !== normalizeString(invoicePaymentTerms)) {
+      overallStatus = 'discrepancy';
+      findings.push(
+        makeFinding({
+          rule_id: 'RULE_PAYMENT_TERMS_MISMATCH',
+          finding_type: 'missing_field',
+          severity: 'high',
+          title: 'Payment terms conflict (Contract vs Invoice)',
+          description: `Contract stipulates payment terms "${contractPaymentTerms}", but invoice specifies "${invoicePaymentTerms}".`,
+          reason: 'Terms divergence: Invoiced credit/payment terms deviate from negotiated contract obligations.',
+          source_document_id: invoice!.id,
+          compared_document_id: contract!.id,
+          source_value: invoicePaymentTerms,
+          compared_value: contractPaymentTerms,
+          source_field: 'payment_terms',
+          compared_field: 'payment_terms',
+          reconciliation_group_id: reconGroupId,
+        })
+      );
+    }
+  } else if (poPaymentTerms && invoicePaymentTerms) {
+    if (normalizeString(poPaymentTerms) !== normalizeString(invoicePaymentTerms)) {
+      overallStatus = 'discrepancy';
+      findings.push(
+        makeFinding({
+          rule_id: 'RULE_PAYMENT_TERMS_MISMATCH',
+          finding_type: 'missing_field',
+          severity: 'medium',
+          title: 'Payment terms conflict (PO vs Invoice)',
+          description: `Purchase order authorized terms "${poPaymentTerms}", but invoice specifies "${invoicePaymentTerms}".`,
+          reason: 'Terms divergence: Invoiced payment terms deviate from purchase order terms.',
+          source_document_id: invoice!.id,
+          compared_document_id: purchaseOrder!.id,
+          source_value: invoicePaymentTerms,
+          compared_value: poPaymentTerms,
+          source_field: 'payment_terms',
+          compared_field: 'payment_terms',
+          reconciliation_group_id: reconGroupId,
+        })
+      );
+    }
+  }
+
+  // 13. Customer Identity Verification
+  const contractCustomer = contract ? getFieldValue(contract.fields, 'customer_name') : null;
+  const poCustomer = purchaseOrder ? getFieldValue(purchaseOrder.fields, 'customer_name') : null;
+  const invoiceCustomer = invoice ? getFieldValue(invoice.fields, 'customer_name') : null;
+
+  if (contractCustomer && poCustomer) {
+    const custCmp = compareSupplierNames(contractCustomer, poCustomer);
+    if (custCmp === 'MISMATCH') {
+      overallStatus = 'discrepancy';
+      findings.push(
+        makeFinding({
+          rule_id: 'RULE_CUSTOMER_MISMATCH',
+          finding_type: 'supplier_mismatch',
+          severity: 'high',
+          title: 'Customer name mismatch (Contract vs PO)',
+          description: `Contract customer "${contractCustomer}" differs from purchase order buyer "${poCustomer}".`,
+          reason: 'Entity identification check: Buyer entity on purchase order does not match contracted client entity.',
+          source_document_id: purchaseOrder!.id,
+          compared_document_id: contract!.id,
+          source_value: poCustomer,
+          compared_value: contractCustomer,
+          source_field: 'customer_name',
+          compared_field: 'customer_name',
+          reconciliation_group_id: reconGroupId,
+        })
+      );
+    }
+  }
+
+  if (poCustomer && invoiceCustomer) {
+    const custCmp = compareSupplierNames(poCustomer, invoiceCustomer);
+    if (custCmp === 'MISMATCH') {
+      overallStatus = 'discrepancy';
+      findings.push(
+        makeFinding({
+          rule_id: 'RULE_CUSTOMER_MISMATCH',
+          finding_type: 'supplier_mismatch',
+          severity: 'high',
+          title: 'Customer name mismatch (PO vs Invoice)',
+          description: `Purchase order customer "${poCustomer}" differs from invoice billed customer "${invoiceCustomer}".`,
+          reason: 'Entity identification check: Billed entity does not match authorized buyer entity.',
+          source_document_id: invoice!.id,
+          compared_document_id: purchaseOrder!.id,
+          source_value: invoiceCustomer,
+          compared_value: poCustomer,
+          source_field: 'customer_name',
+          compared_field: 'customer_name',
+          reconciliation_group_id: reconGroupId,
+        })
+      );
+    }
+  }
+
+  // 14. Discount Discrepancy
+  if (purchaseOrder && invoice) {
+    const poDiscount = getNumericValue(purchaseOrder.fields, 'discount');
+    const invDiscount = getNumericValue(invoice.fields, 'discount');
+
+    if (poDiscount !== null && poDiscount > 0) {
+      if (invDiscount === null || invDiscount < poDiscount - 0.05) {
+        const discountDiff = poDiscount - (invDiscount || 0);
+        overallStatus = 'discrepancy';
+        findings.push(
+          makeFinding({
+            rule_id: 'RULE_DISCOUNT_DISCREPANCY',
+            finding_type: 'amount_mismatch',
+            severity: 'high',
+            title: 'Agreed purchase order discount not applied on invoice',
+            description: `PO specifies an authorized discount of ${currency} ${poDiscount.toLocaleString('en-IN')}, but invoice only applied ${currency} ${(invDiscount || 0).toLocaleString('en-IN')} (${currency} ${discountDiff.toLocaleString('en-IN')} variance).`,
+            reason: 'Pricing variance: Invoiced amounts fail to apply negotiated discount approved on purchase order.',
+            source_document_id: invoice.id,
+            compared_document_id: purchaseOrder.id,
+            source_value: invDiscount ? invDiscount.toString() : '0',
+            compared_value: poDiscount.toString(),
+            variance: discountDiff,
+            financial_impact: discountDiff,
+            currency,
+            calculation_method: 'Discount Variance = PO Authorized Discount - Invoice Applied Discount',
+            source_field: 'discount',
+            compared_field: 'discount',
+            reconciliation_group_id: reconGroupId,
+          })
+        );
       }
     }
   }

@@ -1,15 +1,24 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { ServerPersistence } from '@/lib/server/persistence';
-
+import { authenticateRequest } from '@/lib/server/auth';
 
 export async function GET(req: NextRequest) {
   try {
+    const auth = await authenticateRequest(req);
+    if (!auth.user) {
+      return NextResponse.json(
+        { success: false, error: auth.error || 'Unauthorized: Authentication required' },
+        { status: auth.status || 401 }
+      );
+    }
+
     const { searchParams } = new URL(req.url);
     const severity = searchParams.get('severity');
     const status = searchParams.get('status');
     const q = searchParams.get('q');
 
-    let findings = await ServerPersistence.getFindings();
+    const userIdFilter = auth.user.role === 'admin' || auth.user.role === 'reviewer' ? undefined : auth.user.id;
+    let findings = await ServerPersistence.getFindings(userIdFilter);
 
     if (severity && severity !== 'all') {
       if (severity === 'high') {

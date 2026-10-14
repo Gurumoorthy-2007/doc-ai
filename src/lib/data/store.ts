@@ -178,7 +178,7 @@ export class DataStore {
 
   static updateFindingReview(
     findingId: string,
-    decision: 'accepted' | 'rejected' | 'reviewing',
+    decision: 'accepted' | 'rejected' | 'reviewing' | 'resolved',
     comments: string,
     userName: string = 'Gurumoorthy S'
   ): Finding | null {
@@ -187,15 +187,34 @@ export class DataStore {
 
     const newFindings = findings.map((f) => {
       if (f.id === findingId) {
-        const nextStatus: FindingStatus = decision === 'accepted' ? 'accepted' : decision === 'rejected' ? 'rejected' : 'reviewing';
+        const nextStatus: FindingStatus =
+          decision === 'accepted'
+            ? 'accepted'
+            : decision === 'rejected'
+            ? 'rejected'
+            : decision === 'resolved'
+            ? 'resolved'
+            : 'in_review';
+
+        const history = f.decision_history ? [...f.decision_history] : [];
+        history.push({
+          decision,
+          comments: comments || 'No commentary provided',
+          reviewer: userName,
+          reviewed_by: userName,
+          timestamp: new Date().toISOString(),
+          reviewed_at: new Date().toISOString(),
+        });
+
         updatedFinding = {
           ...f,
           status: nextStatus,
-          is_reviewed: true,
+          is_reviewed: decision !== 'reviewing',
           reviewed_by: userName,
           reviewed_at: new Date().toISOString(),
           review_decision: decision,
           review_comments: comments,
+          decision_history: history,
           updated_at: new Date().toISOString(),
         };
         return updatedFinding;
@@ -437,7 +456,7 @@ export class DataStore {
 
   static async saveFindingReviewApi(
     findingId: string,
-    decision: 'accepted' | 'rejected' | 'reviewing',
+    decision: 'accepted' | 'rejected' | 'reviewing' | 'resolved',
     comments: string,
     reviewerName: string = 'Gurumoorthy S'
   ): Promise<Finding | null> {

@@ -72,8 +72,9 @@ export function calculateFileHash(buffer: Buffer): string {
 export async function validateAndInspectFile(
   buffer: Buffer,
   originalFileName: string,
-  declaredMimeType?: string
+  _declaredMimeType?: string
 ): Promise<ValidatedFile> {
+  void _declaredMimeType;
   // 1. Sanitize file name
   const sanitizedFileName = path.basename(originalFileName).replace(/[^a-zA-Z0-9._\-]/g, '_');
 
@@ -179,12 +180,41 @@ export async function saveFileToStorage(
 }
 
 /**
- * Read stored file from local private storage
+ * Read stored file from local private storage with path traversal protection
  */
 export async function getFileFromStorage(filePath: string): Promise<Buffer | null> {
   try {
-    return await fs.readFile(filePath);
+    const resolvedPath = path.resolve(filePath);
+    const resolvedStorageDir = path.resolve(STORAGE_DIR);
+
+    // Verify resolved path stays strictly within the authorized storage directory
+    if (!resolvedPath.startsWith(resolvedStorageDir)) {
+      console.warn(`[Security Alert] Unauthorized path traversal attempt prevented: ${filePath}`);
+      return null;
+    }
+
+    return await fs.readFile(resolvedPath);
   } catch {
     return null;
+  }
+}
+
+/**
+ * Safely delete a file from storage with path traversal protection
+ */
+export async function deleteFileFromStorage(filePath: string): Promise<boolean> {
+  try {
+    const resolvedPath = path.resolve(filePath);
+    const resolvedStorageDir = path.resolve(STORAGE_DIR);
+
+    if (!resolvedPath.startsWith(resolvedStorageDir)) {
+      console.warn(`[Security Alert] Unauthorized path traversal attempt in delete prevented: ${filePath}`);
+      return false;
+    }
+
+    await fs.unlink(resolvedPath);
+    return true;
+  } catch {
+    return false;
   }
 }

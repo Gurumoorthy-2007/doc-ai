@@ -543,6 +543,65 @@ h4 { font-size: 1.125rem; }
 .badge-medium { background: var(--ds-medium-bg); color: var(--ds-medium); }
 .badge-low { background: var(--ds-low-bg); color: var(--ds-low); }
 
+/* Cross-Document Reconciliation Matrix Badges */
+.badge-matched {
+  background: #ecfdf5;
+  color: #059669;
+  border: 1px solid rgba(16, 185, 129, 0.25);
+}
+.badge-mismatched {
+  background: #fef2f2;
+  color: #dc2626;
+  border: 1px solid rgba(239, 68, 68, 0.25);
+}
+.badge-missing {
+  background: #fffbeb;
+  color: #d97706;
+  border: 1px solid rgba(245, 158, 11, 0.25);
+}
+.badge-unverified {
+  background: #f8fafc;
+  color: #64748b;
+  border: 1px solid #e2e8f0;
+}
+
+/* Accessible Keyboard Focus Rings */
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid var(--ds-teal-500) !important;
+  outline-offset: 2px !important;
+}
+
+/* Responsive Split Layouts for Evidence, Document Details, and Review Queue */
+.evidence-split-layout {
+  display: grid;
+  grid-template-columns: 1.35fr 0.65fr;
+  gap: 24px;
+}
+
+.document-preview-layout {
+  display: grid;
+  grid-template-columns: 1.25fr 0.75fr;
+  gap: 24px;
+}
+
+.review-queue-layout {
+  display: grid;
+  grid-template-columns: 1fr 2fr;
+  gap: 24px;
+}
+
+@media (max-width: 1024px) {
+  .evidence-split-layout,
+  .document-preview-layout,
+  .review-queue-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
 .severity-dot {
   width: 8px;
   height: 8px;

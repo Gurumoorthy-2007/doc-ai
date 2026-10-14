@@ -11,17 +11,13 @@ import type {
   DocumentCategory,
   ExtractedField,
   LineItem,
+  EnhancedExtractionOutput,
 } from '../types';
+import { isNvidiaConfigured, extractWithNvidia } from './nvidia';
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 
-export interface EnhancedExtractionOutput {
-  result: ExtractionResult;
-  fields: ExtractedField[];
-  lineItems: LineItem[];
-  modelUsed: string;
-  sourceConfidence: number;
-}
+export type { EnhancedExtractionOutput };
 
 // ============================================================
 // Deterministic Real Text Extractor Fallback
@@ -98,6 +94,19 @@ function extractFromTextRegex(
   const totalInfo = parseAmountFromLine(new RegExp(`(?:\\b(?:grand total|total amount|total invoice amount|invoice total amount|invoice total|amount payable|net amount|po total amount|purchase order total|contract ceiling|total value|contract value)\\b|\\btotal\\b)\\s*[:\\-]?\\s*${CURRENCY_PREFIX}([0-9,]+(?:\\.[0-9]{1,2})?)`, 'i'));
   const subtotalInfo = parseAmountFromLine(new RegExp(`(?:\\bsubtotal\\b|\\bsub-total\\b|\\bsub total\\b|\\bbase amount\\b)\\s*[:\\-]?\\s*${CURRENCY_PREFIX}([0-9,]+(?:\\.[0-9]{1,2})?)`, 'i'));
   const taxInfo = parseAmountFromLine(new RegExp(`(?:\\btax\\b|\\bgst\\b|\\bvat\\b|\\bcgst\\b|\\bsgst\\b|\\bigst\\b)\\s*[:\\-]?\\s*${CURRENCY_PREFIX}([0-9,]+(?:\\.[0-9]{1,2})?)`, 'i'));
+  const discountInfo = parseAmountFromLine(new RegExp(`(?:\\bdiscount\\b|\\brebate\\b|\\bconcession\\b)\\s*[:\\-]?\\s*${CURRENCY_PREFIX}([0-9,]+(?:\\.[0-9]{1,2})?)`, 'i'));
+
+  // Detect customer / client / buyer
+  let detectedCustomer: string | null = null;
+  let customerSourceText: string | null = null;
+  for (const line of lines.slice(0, 20)) {
+    const custMatch = line.match(/(?:bill to|billed to|client|customer|buyer|purchaser|invoice to)\s*[:\-]?\s*([A-Za-z0-9&.,\s]{3,50})/i);
+    if (custMatch) {
+      detectedCustomer = custMatch[1].trim();
+      customerSourceText = line;
+      break;
+    }
+  }
 
   // Detect dates
   const parseDateFromLine = (regex: RegExp): { date: string | null; sourceText: string | null } => {
@@ -112,6 +121,19 @@ function extractFromTextRegex(
 
   const dateInfo = parseDateFromLine(/(?:date|dated|issue date|invoice date|order date)\s*[:\-]?\s*([0-9]{4}[-/][0-9]{2}[-/][0-9]{2}|[0-9]{1,2}[-/][0-9]{1,2}[-/][0-9]{2,4}|[A-Za-z]{3,9}\s+[0-9]{1,2},\s+[0-9]{4})/i);
   const dueDateInfo = parseDateFromLine(/(?:due date|payment due|expires|valid until)\s*[:\-]?\s*([0-9]{4}[-/][0-9]{2}[-/][0-9]{2}|[0-9]{1,2}[-/][0-9]{1,2}[-/][0-9]{2,4}|[A-Za-z]{3,9}\s+[0-9]{1,2},\s+[0-9]{4})/i);
+  const renewalDateInfo = parseDateFromLine(/(?:renewal date|auto-renew on|renewed on|next renewal)\s*[:\-]?\s*([0-9]{4}[-/][0-9]{2}[-/][0-9]{2}|[0-9]{1,2}[-/][0-9]{1,2}[-/][0-9]{2,4}|[A-Za-z]{3,9}\s+[0-9]{1,2},\s+[0-9]{4})/i);
+  const deliveryDeadlineInfo = parseDateFromLine(/(?:delivery deadline|delivery by|expected delivery|ship by|delivery date)\s*[:\-]?\s*([0-9]{4}[-/][0-9]{2}[-/][0-9]{2}|[0-9]{1,2}[-/][0-9]{1,2}[-/][0-9]{2,4}|[A-Za-z]{3,9}\s+[0-9]{1,2},\s+[0-9]{4})/i);
+
+  // Detect termination clause
+  let terminationClause: string | null = null;
+  let termClauseSourceText: string | null = null;
+  for (const line of lines) {
+    if (/(?:termination|terminate|cancellation clause|notice period|either party may terminate)/i.test(line)) {
+      terminationClause = line.trim();
+      termClauseSourceText = line;
+      break;
+    }
+  }
 
   // Detect identifiers
   const parseIdFromLine = (regex: RegExp): { id: string | null; sourceText: string | null } => {
@@ -138,6 +160,9 @@ function extractFromTextRegex(
   const contractNoInfo = parseIdFromLine(/(?:contract|agreement)\s*(?:number|num|no\.?|#)?\s*[:\-]\s*([A-Za-z0-9\-_/]+)/i).id
     ? parseIdFromLine(/(?:contract|agreement)\s*(?:number|num|no\.?|#)?\s*[:\-]\s*([A-Za-z0-9\-_/]+)/i)
     : parseIdFromLine(/(?:contract|agreement)\s*(?:number|num|no\.?|#)?\s*[:\-]?\s*([A-Za-z0-9\-_/]+)/i);
+
+  // Detect contract reference on PO or invoice
+  const contractRefInfo = parseIdFromLine(/(?:contract\s*ref(?:erence)?|master agreement|msa\s*ref)\s*[:\-]?\s*([A-Za-z0-9\-_/]+)/i);
 
   // Detect payment terms
   let detectedPaymentTerms: string | null = null;
@@ -211,22 +236,30 @@ function extractFromTextRegex(
   if (category === 'contract') {
     addField('contract_number', contractNoInfo.id, 'string', contractNoInfo.sourceText);
     addField('supplier_name', detectedSupplier, 'string', supplierSourceText);
+    addField('customer_name', detectedCustomer, 'string', customerSourceText);
     addField('contract_value', totalInfo.amount, 'number', totalInfo.sourceText);
     addField('currency', detectedCurrency, 'string', currencySourceText);
     addField('effective_date', dateInfo.date, 'string', dateInfo.sourceText);
     addField('expiry_date', dueDateInfo.date, 'string', dueDateInfo.sourceText);
+    addField('renewal_date', renewalDateInfo.date, 'string', renewalDateInfo.sourceText);
+    addField('delivery_deadline', deliveryDeadlineInfo.date, 'string', deliveryDeadlineInfo.sourceText);
+    addField('termination_clause', terminationClause, 'string', termClauseSourceText);
     addField('payment_terms', detectedPaymentTerms, 'string', payTermsSourceText);
 
     const contractData: ContractExtraction = {
       contract_number: contractNoInfo.id,
-      parties: detectedSupplier ? [detectedSupplier] : [],
+      parties: [detectedSupplier, detectedCustomer].filter(Boolean) as string[],
       supplier_name: detectedSupplier,
+      customer_name: detectedCustomer,
       contract_value: totalInfo.amount,
       currency: detectedCurrency,
       effective_date: dateInfo.date,
       expiry_date: dueDateInfo.date,
+      renewal_date: renewalDateInfo.date,
+      delivery_deadline: deliveryDeadlineInfo.date,
+      termination_clause: terminationClause,
       payment_terms: detectedPaymentTerms,
-      deadlines: [],
+      deadlines: [deliveryDeadlineInfo.date, renewalDateInfo.date].filter(Boolean) as string[],
       obligations: [],
     };
 
@@ -242,22 +275,30 @@ function extractFromTextRegex(
   if (category === 'purchase_order') {
     addField('po_number', poNoInfo.id, 'string', poNoInfo.sourceText);
     addField('supplier_name', detectedSupplier, 'string', supplierSourceText);
+    addField('customer_name', detectedCustomer, 'string', customerSourceText);
+    addField('contract_reference', contractRefInfo.id, 'string', contractRefInfo.sourceText);
     addField('currency', detectedCurrency, 'string', currencySourceText);
     addField('order_date', dateInfo.date, 'string', dateInfo.sourceText);
     addField('expected_delivery_date', dueDateInfo.date, 'string', dueDateInfo.sourceText);
+    addField('delivery_deadline', deliveryDeadlineInfo.date, 'string', deliveryDeadlineInfo.sourceText);
     addField('payment_terms', detectedPaymentTerms, 'string', payTermsSourceText);
     addField('subtotal', subtotalInfo.amount, 'number', subtotalInfo.sourceText);
+    addField('discount', discountInfo.amount, 'number', discountInfo.sourceText);
     addField('tax', taxInfo.amount, 'number', taxInfo.sourceText);
     addField('total', totalInfo.amount, 'number', totalInfo.sourceText);
 
     const poData: PurchaseOrderExtraction = {
       po_number: poNoInfo.id,
       supplier_name: detectedSupplier,
+      customer_name: detectedCustomer,
+      contract_reference: contractRefInfo.id,
       currency: detectedCurrency,
       order_date: dateInfo.date,
       expected_delivery_date: dueDateInfo.date,
+      delivery_deadline: deliveryDeadlineInfo.date || dueDateInfo.date,
       payment_terms: detectedPaymentTerms,
       subtotal: subtotalInfo.amount,
+      discount: discountInfo.amount,
       tax: taxInfo.amount,
       total: totalInfo.amount,
       line_items: extractedLineItems.map((li) => ({
@@ -281,24 +322,30 @@ function extractFromTextRegex(
   // Invoice
   addField('invoice_number', invoiceNoInfo.id, 'string', invoiceNoInfo.sourceText);
   addField('supplier_name', detectedSupplier, 'string', supplierSourceText);
+  addField('customer_name', detectedCustomer, 'string', customerSourceText);
+  addField('contract_reference', contractRefInfo.id, 'string', contractRefInfo.sourceText);
   addField('invoice_date', dateInfo.date, 'string', dateInfo.sourceText);
   addField('due_date', dueDateInfo.date, 'string', dueDateInfo.sourceText);
   addField('currency', detectedCurrency, 'string', currencySourceText);
   addField('po_reference', poNoInfo.id, 'string', poNoInfo.sourceText);
   addField('payment_terms', detectedPaymentTerms, 'string', payTermsSourceText);
   addField('subtotal', subtotalInfo.amount, 'number', subtotalInfo.sourceText);
+  addField('discount', discountInfo.amount, 'number', discountInfo.sourceText);
   addField('tax', taxInfo.amount, 'number', taxInfo.sourceText);
   addField('total', totalInfo.amount, 'number', totalInfo.sourceText);
 
   const invData: InvoiceExtraction = {
     invoice_number: invoiceNoInfo.id,
     supplier_name: detectedSupplier,
+    customer_name: detectedCustomer,
+    contract_reference: contractRefInfo.id,
     invoice_date: dateInfo.date,
     due_date: dueDateInfo.date,
     currency: detectedCurrency,
     po_reference: poNoInfo.id,
     payment_terms: detectedPaymentTerms,
     subtotal: subtotalInfo.amount,
+    discount: discountInfo.amount,
     tax: taxInfo.amount,
     total: totalInfo.amount,
     line_items: extractedLineItems.map((li) => ({
@@ -588,11 +635,21 @@ export async function extractDocumentWithEvidence(
 ): Promise<EnhancedExtractionOutput> {
   const base64 = typeof fileContent === 'string' ? fileContent : fileContent.toString('base64');
 
+  // Primary: NVIDIA OpenAI-compatible NIM endpoint if configured
+  if (isNvidiaConfigured()) {
+    try {
+      return await extractWithNvidia(documentText, category, docId, pageTexts);
+    } catch (err: unknown) {
+      console.warn('NVIDIA extraction failed or timed out. Falling back to Gemini / deterministic parser:', (err as Error).message);
+    }
+  }
+
+  // Secondary: Gemini API if configured
   if (GEMINI_API_KEY && GEMINI_API_KEY !== 'your_gemini_api_key') {
     return callGeminiForExtraction(base64, mimeType, category, documentText, docId, pageTexts);
   }
 
-  // Fallback to real deterministic text extraction based on actual extracted document text
+  // Fallback: Real deterministic text extraction based on actual extracted document text
   return extractFromTextRegex(documentText, category, docId, pageTexts);
 }
 
@@ -612,5 +669,5 @@ export async function extractDocument(
 }
 
 export function isUsingDemoMode(): boolean {
-  return !GEMINI_API_KEY || GEMINI_API_KEY === 'your_gemini_api_key';
+  return !isNvidiaConfigured() && (!GEMINI_API_KEY || GEMINI_API_KEY === 'your_gemini_api_key');
 }

@@ -1,12 +1,21 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { ServerPersistence } from '@/lib/server/persistence';
-
+import { deleteFileFromStorage } from '@/lib/server/fileStorage';
+import { authenticateRequest, checkDocumentOwnership } from '@/lib/server/auth';
 
 export async function GET(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const auth = await authenticateRequest(req);
+    if (!auth.user) {
+      return NextResponse.json(
+        { success: false, error: auth.error || 'Unauthorized: Authentication required' },
+        { status: auth.status || 401 }
+      );
+    }
+
     const { id } = await params;
     const doc = await ServerPersistence.getDocumentById(id);
 
@@ -14,6 +23,14 @@ export async function GET(
       return NextResponse.json(
         { success: false, error: `Document ${id} not found` },
         { status: 404 }
+      );
+    }
+
+    // Verify ownership
+    if (!checkDocumentOwnership(auth.user, doc)) {
+      return NextResponse.json(
+        { success: false, error: 'Forbidden: You do not have permission to access this document' },
+        { status: 403 }
       );
     }
 
@@ -41,10 +58,18 @@ export async function GET(
 }
 
 export async function DELETE(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const auth = await authenticateRequest(req);
+    if (!auth.user) {
+      return NextResponse.json(
+        { success: false, error: auth.error || 'Unauthorized: Authentication required' },
+        { status: auth.status || 401 }
+      );
+    }
+
     const { id } = await params;
     const doc = await ServerPersistence.getDocumentById(id);
     if (!doc) {
@@ -54,16 +79,34 @@ export async function DELETE(
       );
     }
 
+    // Verify ownership
+    if (!checkDocumentOwnership(auth.user, doc)) {
+      return NextResponse.json(
+        { success: false, error: 'Forbidden: You do not have permission to delete this document' },
+        { status: 403 }
+      );
+    }
+
+    // Delete document from persistence layer
     await ServerPersistence.deleteDocument(id);
 
+    // Clean up physical file storage if no other document shares this file
+    if (doc.file_path) {
+      const allDocs = await ServerPersistence.getDocuments();
+      const isShared = allDocs.some((d) => d.id !== id && d.file_path === doc.file_path);
+      if (!isShared) {
+        await deleteFileFromStorage(doc.file_path).catch(() => {});
+      }
+    }
+
     await ServerPersistence.addAuditEvent({
-      user_name: 'Gurumoorthy S',
-      user_email: 'gurumoorthy@docusentinel.ai',
+      user_name: auth.user.name,
+      user_email: auth.user.email,
       action: 'Document Deleted',
       entity_type: 'document',
       entity_id: id,
       entity_title: doc.file_name,
-      details: `Deleted document ${doc.file_name} from persistent workspace.`,
+      details: `Deleted document ${doc.file_name} and cleaned up associated extracted records and storage.`,
     });
 
     return NextResponse.json({ success: true, message: 'Document deleted successfully' });

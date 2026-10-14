@@ -22,8 +22,20 @@ import {
   ExternalLink,
   Shield,
   FileCheck,
+  BookOpen,
+  X,
 } from 'lucide-react';
 import { format } from 'date-fns';
+
+interface AiSummaryData {
+  summary: string;
+  keyPoints: string[];
+  riskLevel: 'low' | 'medium' | 'high';
+  obligations: string[];
+  missingInformation: string[];
+  isAiGenerated: boolean;
+  modelUsed: string;
+}
 
 function DocumentDetailsContent({ params }: { params: Promise<{ id: string }> }) {
   const resolvedParams = use(params);
@@ -35,8 +47,13 @@ function DocumentDetailsContent({ params }: { params: Promise<{ id: string }> })
   const [findings, setFindings] = useState<Finding[]>([]);
   const [activeTab, setActiveTab] = useState<'fields' | 'lineItems' | 'preview' | 'findings'>('fields');
   const [isExtracting, setIsExtracting] = useState(false);
-
   const [docText, setDocText] = useState<string>('');
+
+  // AI Summary State
+  const [aiSummary, setAiSummary] = useState<AiSummaryData | null>(null);
+  const [isLoadingSummary, setIsLoadingSummary] = useState(false);
+  const [showSummaryModal, setShowSummaryModal] = useState(false);
+  const [summaryError, setSummaryError] = useState<string | null>(null);
 
   useEffect(() => {
     let isMounted = true;
@@ -83,6 +100,29 @@ function DocumentDetailsContent({ params }: { params: Promise<{ id: string }> })
       console.error('Extraction error:', err);
     } finally {
       setIsExtracting(false);
+    }
+  };
+
+  const handleGenerateSummary = async () => {
+    if (!doc) return;
+    setIsLoadingSummary(true);
+    setSummaryError(null);
+    setShowSummaryModal(true);
+
+    try {
+      const res = await fetch(`/api/documents/${doc.id}/summarize`, {
+        method: 'POST',
+      });
+      const data = await res.json();
+      if (res.ok && data.success && data.data) {
+        setAiSummary(data.data);
+      } else {
+        setSummaryError(data.error || 'Failed to generate summary');
+      }
+    } catch (err: any) {
+      setSummaryError(err.message || 'Network error generating summary');
+    } finally {
+      setIsLoadingSummary(false);
     }
   };
 
@@ -152,7 +192,7 @@ function DocumentDetailsContent({ params }: { params: Promise<{ id: string }> })
                 </h1>
                 <span className="badge badge-success">Completed</span>
               </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 16, fontSize: '0.78rem', color: 'var(--ds-text-muted)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 16, fontSize: '0.78rem', color: 'var(--ds-text-muted)', flexWrap: 'wrap' }}>
                 <span>Category: <strong style={{ color: 'var(--ds-text-secondary)', textTransform: 'capitalize' }}>{doc.category.replace('_', ' ')}</strong></span>
                 <span>•</span>
                 <span>Size: <strong style={{ color: 'var(--ds-text-secondary)' }}>{(doc.file_size / (1024 * 1024)).toFixed(1)} MB</strong></span>
@@ -164,7 +204,16 @@ function DocumentDetailsContent({ params }: { params: Promise<{ id: string }> })
             </div>
           </div>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+            <button
+              onClick={handleGenerateSummary}
+              className="btn btn-secondary"
+              title="Generate Executive AI Summary"
+            >
+              <BookOpen size={14} color="var(--ds-teal-500)" />
+              <span>AI Executive Summary</span>
+            </button>
+
             <button
               onClick={handleRunExtraction}
               className="btn btn-secondary"
@@ -183,6 +232,16 @@ function DocumentDetailsContent({ params }: { params: Promise<{ id: string }> })
               )}
             </button>
 
+            <a
+              href={`/api/documents/${doc.id}/file`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="btn btn-secondary"
+            >
+              <Download size={14} />
+              <span>Download File</span>
+            </a>
+
             <Link href="/reconciliation" className="btn btn-primary">
               <GitCompareArrows size={14} />
               <span>Reconcile</span>
@@ -192,7 +251,7 @@ function DocumentDetailsContent({ params }: { params: Promise<{ id: string }> })
       </div>
 
       {/* Tabs */}
-      <div style={{ display: 'flex', borderBottom: '1px solid var(--ds-border)', marginBottom: 20, gap: 24 }}>
+      <div style={{ display: 'flex', borderBottom: '1px solid var(--ds-border)', marginBottom: 20, gap: 24, overflowX: 'auto' }}>
         <button
           onClick={() => setActiveTab('fields')}
           style={{
@@ -207,6 +266,7 @@ function DocumentDetailsContent({ params }: { params: Promise<{ id: string }> })
             display: 'flex',
             alignItems: 'center',
             gap: 8,
+            whiteSpace: 'nowrap',
           }}
         >
           <Layers size={16} />
@@ -230,6 +290,7 @@ function DocumentDetailsContent({ params }: { params: Promise<{ id: string }> })
             display: 'flex',
             alignItems: 'center',
             gap: 8,
+            whiteSpace: 'nowrap',
           }}
         >
           <FileCheck size={16} />
@@ -253,6 +314,7 @@ function DocumentDetailsContent({ params }: { params: Promise<{ id: string }> })
             display: 'flex',
             alignItems: 'center',
             gap: 8,
+            whiteSpace: 'nowrap',
           }}
         >
           <ExternalLink size={16} />
@@ -273,6 +335,7 @@ function DocumentDetailsContent({ params }: { params: Promise<{ id: string }> })
             display: 'flex',
             alignItems: 'center',
             gap: 8,
+            whiteSpace: 'nowrap',
           }}
         >
           <AlertTriangle size={16} />
@@ -395,7 +458,7 @@ function DocumentDetailsContent({ params }: { params: Promise<{ id: string }> })
 
       {/* Tab 3: Document Evidence Preview */}
       {activeTab === 'preview' && (
-        <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 0.8fr', gap: 20 }}>
+        <div className="document-preview-layout">
           {/* Document Viewer */}
           <div className="card" style={{ padding: 24 }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16, borderBottom: '1px solid var(--ds-border-light)', paddingBottom: 12 }}>
@@ -463,7 +526,7 @@ function DocumentDetailsContent({ params }: { params: Promise<{ id: string }> })
           {/* Right Information Box */}
           <div className="card" style={{ padding: 24 }}>
             <h3 style={{ fontSize: '1rem', fontWeight: 600, marginBottom: 16 }}>
-              Extraction Metadata
+              Extraction Metadata & Provenance
             </h3>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 14, fontSize: '0.85rem' }}>
               <div>
@@ -475,12 +538,16 @@ function DocumentDetailsContent({ params }: { params: Promise<{ id: string }> })
                 <code style={{ fontSize: '0.75rem' }}>{doc.file_hash || 'verified-integrity'}</code>
               </div>
               <div>
-                <span style={{ color: 'var(--ds-text-muted)' }}>OCR Engine:</span>{' '}
-                <strong>Gemini Vision Multimodal</strong>
+                <span style={{ color: 'var(--ds-text-muted)' }}>AI Extraction Engine:</span>{' '}
+                <strong>NVIDIA NIM & Gemini Multimodal</strong>
               </div>
               <div>
                 <span style={{ color: 'var(--ds-text-muted)' }}>Source Grounding:</span>{' '}
                 <span className="badge badge-success">Direct Document Evidence</span>
+              </div>
+              <div>
+                <span style={{ color: 'var(--ds-text-muted)' }}>Storage Location:</span>{' '}
+                <code style={{ fontSize: '0.75rem' }}>{doc.file_path}</code>
               </div>
             </div>
           </div>
@@ -506,13 +573,13 @@ function DocumentDetailsContent({ params }: { params: Promise<{ id: string }> })
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'space-between',
-                  borderLeft: `4px solid ${f.severity === 'high' ? 'var(--ds-error)' : 'var(--ds-warning)'}`,
+                  borderLeft: `4px solid ${f.severity === 'high' || f.severity === 'critical' ? 'var(--ds-error)' : 'var(--ds-warning)'}`,
                 }}
               >
                 <div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
                     <span style={{ fontWeight: 700, color: 'var(--ds-text-primary)' }}>{f.title}</span>
-                    <span className={`badge ${f.severity === 'high' ? 'badge-error' : 'badge-warning'}`}>
+                    <span className={`badge ${f.severity === 'high' || f.severity === 'critical' ? 'badge-error' : 'badge-warning'}`}>
                       {f.severity.toUpperCase()}
                     </span>
                     <span className="badge">{f.id}</span>
@@ -528,6 +595,128 @@ function DocumentDetailsContent({ params }: { params: Promise<{ id: string }> })
               </div>
             ))
           )}
+        </div>
+      )}
+
+      {/* AI Summary Modal Dialog */}
+      {showSummaryModal && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(0, 0, 0, 0.5)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 100,
+            padding: 16,
+          }}
+        >
+          <div className="card" style={{ maxWidth: 640, width: '100%', maxHeight: '85vh', overflowY: 'auto', padding: 28 }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16, borderBottom: '1px solid var(--ds-border-light)', paddingBottom: 12 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <Sparkles size={20} color="var(--ds-teal-500)" />
+                <h2 style={{ fontSize: '1.15rem', fontWeight: 700, margin: 0 }}>
+                  AI Executive Document Briefing
+                </h2>
+              </div>
+              <button
+                onClick={() => setShowSummaryModal(false)}
+                className="icon-btn"
+                aria-label="Close summary modal"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {isLoadingSummary ? (
+              <div style={{ textAlign: 'center', padding: '40px 20px', color: 'var(--ds-text-secondary)' }}>
+                <RefreshCw size={28} className="spin" style={{ margin: '0 auto 12px', color: 'var(--ds-teal-500)' }} />
+                <div style={{ fontWeight: 600 }}>Analyzing Document with AI Engine...</div>
+                <div style={{ fontSize: '0.8rem', color: 'var(--ds-text-muted)', marginTop: 4 }}>
+                  Synthesizing key commercial obligations and risk profile
+                </div>
+              </div>
+            ) : aiSummary ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                <div>
+                  <h3 style={{ fontSize: '0.88rem', fontWeight: 600, color: 'var(--ds-text-secondary)', marginBottom: 6 }}>
+                    Executive Summary
+                  </h3>
+                  <div
+                    style={{
+                      background: 'var(--ds-bg)',
+                      padding: '12px 16px',
+                      borderRadius: 'var(--ds-radius)',
+                      fontSize: '0.85rem',
+                      lineHeight: 1.6,
+                      color: 'var(--ds-text-primary)',
+                      borderLeft: '3px solid var(--ds-teal-500)',
+                    }}
+                  >
+                    {aiSummary.summary}
+                  </div>
+                </div>
+
+                {aiSummary.keyPoints && aiSummary.keyPoints.length > 0 && (
+                  <div>
+                    <h3 style={{ fontSize: '0.88rem', fontWeight: 600, color: 'var(--ds-text-secondary)', marginBottom: 6 }}>
+                      Key Commercial Terms
+                    </h3>
+                    <ul style={{ margin: 0, paddingLeft: 20, fontSize: '0.85rem', color: 'var(--ds-text-primary)', lineHeight: 1.6 }}>
+                      {aiSummary.keyPoints.map((pt, i) => (
+                        <li key={i}>{pt}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                {aiSummary.obligations && aiSummary.obligations.length > 0 && (
+                  <div>
+                    <h3 style={{ fontSize: '0.88rem', fontWeight: 600, color: 'var(--ds-text-secondary)', marginBottom: 6 }}>
+                      Contractual Obligations
+                    </h3>
+                    <ul style={{ margin: 0, paddingLeft: 20, fontSize: '0.85rem', color: 'var(--ds-text-primary)', lineHeight: 1.6 }}>
+                      {aiSummary.obligations.map((ob, i) => (
+                        <li key={i}>{ob}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    paddingTop: 12,
+                    borderTop: '1px solid var(--ds-border-light)',
+                    fontSize: '0.75rem',
+                    color: 'var(--ds-text-muted)',
+                  }}
+                >
+                  <span>Model: {aiSummary.modelUsed}</span>
+                  <span className="badge badge-info">AI-Assisted (Review Required)</span>
+                </div>
+              </div>
+            ) : summaryError ? (
+              <div style={{ textAlign: 'center', padding: '30px 20px', color: 'var(--ds-error)' }}>
+                <AlertTriangle size={32} style={{ margin: '0 auto 10px' }} />
+                <div style={{ fontWeight: 600 }}>{summaryError}</div>
+                <button onClick={handleGenerateSummary} className="btn btn-secondary" style={{ marginTop: 14 }}>
+                  Retry Analysis
+                </button>
+              </div>
+            ) : null}
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 20 }}>
+              <button onClick={() => setShowSummaryModal(false)} className="btn btn-primary">
+                Done
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </AppShell>

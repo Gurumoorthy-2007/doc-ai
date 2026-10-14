@@ -7,7 +7,9 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "tsx --test tests/reconciliation.test.mjs tests/integration.test.mjs"
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --test tests/reconciliation.test.mjs tests/integration.test.mjs tests/nvidia.test.mjs",
+    "test:all": "tsx --test tests/reconciliation.test.mjs tests/integration.test.mjs tests/nvidia.test.mjs && node tests/test_journey.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.7",
@@ -16,6 +18,7 @@
     "date-fns": "^4.4.0",
     "lucide-react": "^1.55.0",
     "next": "16.4.0",
+    "openai": "^7.32.0",
     "pdf-parse": "^2.4.5",
     "react": "19.3.0",
     "react-dom": "19.3.0",

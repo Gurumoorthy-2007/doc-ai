@@ -1,13 +1,21 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { ServerPersistence } from '@/lib/server/persistence';
 import { getFileFromStorage, validateAndInspectFile } from '@/lib/server/fileStorage';
-
+import { authenticateRequest, checkDocumentOwnership } from '@/lib/server/auth';
 
 export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const auth = await authenticateRequest(req);
+    if (!auth.user) {
+      return NextResponse.json(
+        { success: false, error: auth.error || 'Unauthorized: Authentication required' },
+        { status: auth.status || 401 }
+      );
+    }
+
     const { id } = await params;
     const { searchParams } = new URL(req.url);
     const asText = searchParams.get('text') === 'true';
@@ -20,10 +28,17 @@ export async function GET(
       );
     }
 
+    // Verify document ownership
+    if (!checkDocumentOwnership(auth.user, doc)) {
+      return NextResponse.json(
+        { success: false, error: 'Forbidden: You do not have permission to access or download this document.' },
+        { status: 403 }
+      );
+    }
+
     const buffer = await getFileFromStorage(doc.file_path);
 
     if (!buffer) {
-      // Fallback: If original binary not found on disk, return structured metadata
       return NextResponse.json(
         {
           success: false,
@@ -54,7 +69,7 @@ export async function GET(
       });
     }
 
-    // Return the actual file binary
+    // Return the actual file binary with strict security headers
     const headers = new Headers();
     headers.set('Content-Type', doc.mime_type || 'application/pdf');
     headers.set(
@@ -62,6 +77,7 @@ export async function GET(
       `inline; filename="${encodeURIComponent(doc.file_name)}"`
     );
     headers.set('X-Content-Type-Options', 'nosniff');
+    headers.set('Cache-Control', 'private, no-cache, no-store, must-revalidate');
 
     return new NextResponse(buffer as unknown as BodyInit, {
       status: 200,

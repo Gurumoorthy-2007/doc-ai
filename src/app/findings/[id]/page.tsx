@@ -19,8 +19,25 @@ import {
   Shield,
   Layers,
   FileSearch,
+  ChevronLeft,
+  ChevronRight,
+  Sparkles,
+  RefreshCw,
+  Quote,
+  Check,
 } from 'lucide-react';
 import { format } from 'date-fns';
+
+interface AiExplanationData {
+  findingId: string;
+  title: string;
+  explanation: string;
+  rootCause: string;
+  recommendedAction: string;
+  confidence: number;
+  isAiGenerated: boolean;
+  modelUsed: string;
+}
 
 function EvidenceViewerContent({ params }: { params: Promise<{ id: string }> }) {
   const resolvedParams = use(params);
@@ -41,6 +58,12 @@ function EvidenceViewerContent({ params }: { params: Promise<{ id: string }> }) 
   const [reviewDecision, setReviewDecision] = useState<'accepted' | 'rejected' | 'reviewing'>('accepted');
   const [reviewComment, setReviewComment] = useState('');
   const [isSavingReview, setIsSavingReview] = useState(false);
+  const [saveSuccessMsg, setSaveSuccessMsg] = useState('');
+
+  // AI Explanation State
+  const [aiExplanation, setAiExplanation] = useState<AiExplanationData | null>(null);
+  const [isLoadingAi, setIsLoadingAi] = useState(false);
+  const [aiError, setAiError] = useState<string | null>(null);
 
   useEffect(() => {
     let isMounted = true;
@@ -58,7 +81,13 @@ function EvidenceViewerContent({ params }: { params: Promise<{ id: string }> }) 
             setCurrentPage(data.finding.source_page);
           }
           if (data.sourceDocument?.page_count) {
-            setTotalPages(data.sourceDocument.page_count);
+            setTotalPages(Math.max(1, data.sourceDocument.page_count));
+          }
+          if (data.finding.review_decision) {
+            setReviewDecision(data.finding.review_decision);
+          }
+          if (data.finding.review_comments) {
+            setReviewComment(data.finding.review_comments);
           }
 
           // Fetch real document text for evidence highlighting
@@ -71,7 +100,7 @@ function EvidenceViewerContent({ params }: { params: Promise<{ id: string }> }) 
                 if (textData?.data?.text) {
                   setDocText(textData.data.text);
                   if (textData.data.pageCount) {
-                    setTotalPages(textData.data.pageCount);
+                    setTotalPages(Math.max(1, textData.data.pageCount));
                   }
                 }
               })
@@ -94,6 +123,27 @@ function EvidenceViewerContent({ params }: { params: Promise<{ id: string }> }) 
     };
   }, [resolvedParams.id]);
 
+  const handleFetchAiExplanation = async () => {
+    if (!finding) return;
+    setIsLoadingAi(true);
+    setAiError(null);
+    try {
+      const res = await fetch(`/api/findings/${finding.id}/explain`, {
+        method: 'POST',
+      });
+      const data = await res.json();
+      if (res.ok && data.success && data.data) {
+        setAiExplanation(data.data);
+      } else {
+        setAiError(data.error || 'Failed to generate AI explanation');
+      }
+    } catch (err: any) {
+      setAiError(err.message || 'Network error fetching AI explanation');
+    } finally {
+      setIsLoadingAi(false);
+    }
+  };
+
   const handleSaveReview = async () => {
     if (!finding) return;
     setIsSavingReview(true);
@@ -107,6 +157,8 @@ function EvidenceViewerContent({ params }: { params: Promise<{ id: string }> }) 
       );
       if (updated) {
         setFinding(updated);
+        setSaveSuccessMsg('Review decision recorded to audit log.');
+        setTimeout(() => setSaveSuccessMsg(''), 4000);
       }
       setShowReviewModal(false);
     } catch (err) {
@@ -183,16 +235,22 @@ function EvidenceViewerContent({ params }: { params: Promise<{ id: string }> }) 
         <div>
           <div
             style={{
-              padding: '8px 12px',
+              padding: '10px 14px',
               borderRadius: 'var(--ds-radius)',
               background: 'var(--ds-warning-bg)',
               border: '1px solid rgba(245, 158, 11, 0.3)',
               marginBottom: 16,
               fontSize: '0.8rem',
               color: 'var(--ds-warning)',
+              display: 'flex',
+              alignItems: 'flex-start',
+              gap: 8,
             }}
           >
-            <strong>Note:</strong> Exact passage &ldquo;{passage}&rdquo; was extracted by the parser but could not be strictly aligned character-for-character in the raw text stream. Raw document content shown below.
+            <AlertTriangle size={16} style={{ flexShrink: 0, marginTop: 2 }} />
+            <div>
+              <strong>Passage Alignment Note:</strong> The exact passage &ldquo;{passage}&rdquo; was parsed by the document intelligence engine from Page {finding?.source_page || 1}, but could not be strictly aligned character-for-character in the raw text stream. Raw document content shown below without synthetic highlights.
+            </div>
           </div>
           <pre
             style={{
@@ -216,35 +274,54 @@ function EvidenceViewerContent({ params }: { params: Promise<{ id: string }> }) 
     const after = docText.slice(matchIndex + passage.length);
 
     return (
-      <pre
-        style={{
-          whiteSpace: 'pre-wrap',
-          wordBreak: 'break-word',
-          fontFamily: 'monospace',
-          fontSize: '0.82rem',
-          lineHeight: 1.6,
-          margin: 0,
-          color: 'var(--ds-text-primary)',
-        }}
-      >
-        {before}
-        <mark
+      <div>
+        <div
           style={{
-            background: '#fee2e2',
-            color: '#991b1b',
-            border: '2px solid #ef4444',
-            borderRadius: 4,
-            padding: '2px 6px',
-            fontWeight: 700,
-            boxShadow: '0 0 8px rgba(239, 68, 68, 0.4)',
-            display: 'inline-block',
+            padding: '8px 12px',
+            borderRadius: 'var(--ds-radius)',
+            background: 'var(--ds-success-bg)',
+            border: '1px solid rgba(16, 185, 129, 0.3)',
+            marginBottom: 14,
+            fontSize: '0.78rem',
+            color: 'var(--ds-success)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 6,
           }}
-          title={`Flagged Field: ${finding?.source_field || 'Value'}`}
         >
-          {matched}
-        </mark>
-        {after}
-      </pre>
+          <CheckCircle size={14} />
+          <span>Verified passage located and highlighted at exact text coordinate below.</span>
+        </div>
+        <pre
+          style={{
+            whiteSpace: 'pre-wrap',
+            wordBreak: 'break-word',
+            fontFamily: 'monospace',
+            fontSize: '0.82rem',
+            lineHeight: 1.6,
+            margin: 0,
+            color: 'var(--ds-text-primary)',
+          }}
+        >
+          {before}
+          <mark
+            style={{
+              background: '#fee2e2',
+              color: '#991b1b',
+              border: '2px solid #ef4444',
+              borderRadius: 4,
+              padding: '2px 6px',
+              fontWeight: 700,
+              boxShadow: '0 0 8px rgba(239, 68, 68, 0.4)',
+              display: 'inline-block',
+            }}
+            title={`Verified Flagged Field: ${finding?.source_field || 'Value'}`}
+          >
+            {matched}
+          </mark>
+          {after}
+        </pre>
+      </div>
     );
   };
 
@@ -295,7 +372,7 @@ function EvidenceViewerContent({ params }: { params: Promise<{ id: string }> }) 
           }}
         >
           <ArrowLeft size={16} />
-          <span>Back to Findings</span>
+          <span>Back to Findings Matrix</span>
         </Link>
       </div>
 
@@ -347,7 +424,7 @@ function EvidenceViewerContent({ params }: { params: Promise<{ id: string }> }) 
               className="btn btn-primary"
             >
               <CheckCircle size={14} />
-              <span>Submit Review</span>
+              <span>Record Review Decision</span>
             </button>
           </div>
         </div>
@@ -392,6 +469,26 @@ function EvidenceViewerContent({ params }: { params: Promise<{ id: string }> }) 
         )}
       </div>
 
+      {saveSuccessMsg && (
+        <div
+          style={{
+            padding: '10px 16px',
+            marginBottom: 16,
+            borderRadius: 'var(--ds-radius)',
+            background: 'var(--ds-success-bg)',
+            border: '1px solid rgba(16, 185, 129, 0.3)',
+            color: 'var(--ds-success)',
+            fontSize: '0.85rem',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+          }}
+        >
+          <CheckCircle size={16} />
+          <span>{saveSuccessMsg}</span>
+        </div>
+      )}
+
       {/* Tabs */}
       <div style={{ display: 'flex', borderBottom: '1px solid var(--ds-border)', marginBottom: 20, gap: 24 }}>
         <button
@@ -429,10 +526,49 @@ function EvidenceViewerContent({ params }: { params: Promise<{ id: string }> }) 
 
       {/* Tab 1: Evidence Split View */}
       {activeTab === 'evidence' && (
-        <div style={{ display: 'grid', gridTemplateColumns: '1.3fr 0.7fr', gap: 24 }}>
+        <div className="evidence-split-layout">
           {/* Left: Original Document Viewer */}
           <div className="card" style={{ padding: 20 }}>
-            {/* Document Controls Header */}
+            {/* Verified Source Passage Callout Box */}
+            <div
+              style={{
+                background: 'var(--ds-bg)',
+                border: '1px solid var(--ds-border)',
+                borderRadius: 'var(--ds-radius)',
+                padding: '14px 18px',
+                marginBottom: 16,
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, flexWrap: 'wrap', gap: 8 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <Quote size={16} color="var(--ds-teal-500)" />
+                  <span style={{ fontWeight: 600, fontSize: '0.82rem', color: 'var(--ds-text-primary)' }}>
+                    Verified Source Passage
+                  </span>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <span className="badge badge-info">Page {finding.source_page || currentPage}</span>
+                  <span className="badge">Field: {finding.source_field || 'Obligation'}</span>
+                </div>
+              </div>
+              <div
+                style={{
+                  background: 'white',
+                  padding: '10px 14px',
+                  borderRadius: 'var(--ds-radius-sm)',
+                  borderLeft: '3px solid var(--ds-error)',
+                  fontFamily: 'monospace',
+                  fontSize: '0.82rem',
+                  color: 'var(--ds-text-primary)',
+                  wordBreak: 'break-word',
+                  boxShadow: 'var(--ds-shadow-sm)',
+                }}
+              >
+                &ldquo;{finding.source_text || finding.source_value || 'Direct calculation'}&rdquo;
+              </div>
+            </div>
+
+            {/* Document Controls Header with Interactive Page Navigation */}
             <div
               style={{
                 display: 'flex',
@@ -441,6 +577,8 @@ function EvidenceViewerContent({ params }: { params: Promise<{ id: string }> }) 
                 paddingBottom: 12,
                 borderBottom: '1px solid var(--ds-border-light)',
                 marginBottom: 16,
+                flexWrap: 'wrap',
+                gap: 10,
               }}
             >
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -448,7 +586,31 @@ function EvidenceViewerContent({ params }: { params: Promise<{ id: string }> }) 
                 <span style={{ fontWeight: 600, fontSize: '0.85rem' }}>
                   {sourceDoc?.file_name || (finding.source_document_id ? `${finding.source_document_id}.pdf` : 'Source Document')}
                 </span>
-                <span className="badge badge-info">Page {currentPage} of {totalPages}</span>
+
+                {/* Interactive Page Navigation Controls */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginLeft: 6 }}>
+                  <button
+                    onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                    disabled={currentPage <= 1}
+                    className="icon-btn"
+                    title="Previous Page"
+                    style={{ padding: '3px 6px', height: 28, opacity: currentPage <= 1 ? 0.4 : 1 }}
+                  >
+                    <ChevronLeft size={15} />
+                  </button>
+                  <span className="badge badge-info" style={{ fontSize: '0.75rem' }}>
+                    Page {currentPage} of {totalPages}
+                  </span>
+                  <button
+                    onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                    disabled={currentPage >= totalPages}
+                    className="icon-btn"
+                    title="Next Page"
+                    style={{ padding: '3px 6px', height: 28, opacity: currentPage >= totalPages ? 0.4 : 1 }}
+                  >
+                    <ChevronRight size={15} />
+                  </button>
+                </div>
               </div>
 
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -503,7 +665,7 @@ function EvidenceViewerContent({ params }: { params: Promise<{ id: string }> }) 
             </div>
           </div>
 
-          {/* Right: Evidence Inspection & Actions */}
+          {/* Right: Evidence Inspection, AI Explanation & Actions */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
             {/* Extracted Values Cross-Reference */}
             <div className="card" style={{ padding: 20 }}>
@@ -527,24 +689,6 @@ function EvidenceViewerContent({ params }: { params: Promise<{ id: string }> }) 
                 </div>
 
                 <div>
-                  <span style={{ fontSize: '0.75rem', color: 'var(--ds-text-muted)' }}>Exact Source Passage:</span>
-                  <div
-                    style={{
-                      background: 'var(--ds-bg)',
-                      padding: '8px 12px',
-                      borderRadius: 'var(--ds-radius)',
-                      fontFamily: 'monospace',
-                      fontSize: '0.8rem',
-                      marginTop: 4,
-                      border: '1px solid var(--ds-border-light)',
-                      wordBreak: 'break-word',
-                    }}
-                  >
-                    &ldquo;{finding.source_text || finding.source_value || 'Direct parsed calculation'}&rdquo;
-                  </div>
-                </div>
-
-                <div>
                   <span style={{ fontSize: '0.75rem', color: 'var(--ds-text-muted)' }}>Related Comparison:</span>
                   <div style={{ fontSize: '0.85rem', color: 'var(--ds-text-secondary)', marginTop: 4 }}>
                     {comparedDoc?.file_name || 'Comparison Document'} • Expected: <strong>
@@ -562,67 +706,161 @@ function EvidenceViewerContent({ params }: { params: Promise<{ id: string }> }) 
               </div>
             </div>
 
-            {/* Suggested Human-in-the-loop Actions */}
+            {/* AI Root Cause & Recommendation Card */}
+            <div className="card" style={{ padding: 20, border: '1px solid rgba(13, 148, 136, 0.25)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <Sparkles size={16} color="var(--ds-teal-500)" />
+                  <h3 style={{ fontSize: '0.95rem', fontWeight: 600, margin: 0 }}>
+                    AI Root Cause Analysis
+                  </h3>
+                </div>
+                <button
+                  onClick={handleFetchAiExplanation}
+                  disabled={isLoadingAi}
+                  className="btn btn-secondary"
+                  style={{ padding: '3px 8px', fontSize: '0.72rem' }}
+                  title="Generate or Refresh AI Explanation"
+                >
+                  {isLoadingAi ? (
+                    <RefreshCw size={12} className="spin" />
+                  ) : (
+                    <RefreshCw size={12} />
+                  )}
+                  <span>{aiExplanation ? 'Refresh' : 'Analyze'}</span>
+                </button>
+              </div>
+
+              {aiExplanation ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10, fontSize: '0.82rem' }}>
+                  <div>
+                    <span style={{ fontSize: '0.75rem', color: 'var(--ds-text-muted)' }}>Root Cause:</span>
+                    <p style={{ margin: '2px 0 0 0', color: 'var(--ds-text-primary)', lineHeight: 1.4 }}>
+                      {aiExplanation.rootCause}
+                    </p>
+                  </div>
+                  <div>
+                    <span style={{ fontSize: '0.75rem', color: 'var(--ds-text-muted)' }}>Recommended Action:</span>
+                    <p style={{ margin: '2px 0 0 0', color: 'var(--ds-text-secondary)', lineHeight: 1.4 }}>
+                      {aiExplanation.recommendedAction}
+                    </p>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 4, paddingTop: 8, borderTop: '1px solid var(--ds-border-light)' }}>
+                    <span style={{ fontSize: '0.72rem', color: 'var(--ds-text-muted)' }}>
+                      Confidence: {(aiExplanation.confidence * 100).toFixed(0)}% • {aiExplanation.modelUsed}
+                    </span>
+                    <span className="badge badge-info" style={{ fontSize: '0.7rem' }}>
+                      AI Generated
+                    </span>
+                  </div>
+                </div>
+              ) : (
+                <div style={{ textAlign: 'center', padding: '16px 8px', color: 'var(--ds-text-muted)', fontSize: '0.82rem' }}>
+                  <p style={{ margin: '0 0 10px 0' }}>
+                    Generate an AI root cause diagnosis and recommended auditor action based on cross-document evidence.
+                  </p>
+                  <button
+                    onClick={handleFetchAiExplanation}
+                    disabled={isLoadingAi}
+                    className="btn btn-secondary"
+                    style={{ fontSize: '0.78rem', margin: '0 auto' }}
+                  >
+                    <Sparkles size={14} color="var(--ds-teal-500)" />
+                    <span>{isLoadingAi ? 'Analyzing Evidence...' : 'Generate AI Diagnosis'}</span>
+                  </button>
+                </div>
+              )}
+
+              {aiError && (
+                <div style={{ fontSize: '0.75rem', color: 'var(--ds-error)', marginTop: 8 }}>
+                  {aiError}
+                </div>
+              )}
+            </div>
+
+            {/* Inline Review Decision Panel */}
             <div className="card" style={{ padding: 20 }}>
               <h3 style={{ fontSize: '0.95rem', fontWeight: 600, marginBottom: 14 }}>
-                Suggested Review Actions
+                Review Decision Actions
               </h3>
 
               <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 6 }}>
+                  <button
+                    type="button"
+                    onClick={() => setReviewDecision('accepted')}
+                    className={`btn ${reviewDecision === 'accepted' ? 'btn-primary' : 'btn-secondary'}`}
+                    style={{ fontSize: '0.75rem', padding: '8px 4px', justifyContent: 'center' }}
+                  >
+                    <CheckCircle size={13} />
+                    <span>Confirm</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setReviewDecision('rejected')}
+                    className={`btn ${reviewDecision === 'rejected' ? 'btn-primary' : 'btn-secondary'}`}
+                    style={{ fontSize: '0.75rem', padding: '8px 4px', justifyContent: 'center' }}
+                  >
+                    <XCircle size={13} />
+                    <span>Dismiss</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setReviewDecision('reviewing')}
+                    className={`btn ${reviewDecision === 'reviewing' ? 'btn-primary' : 'btn-secondary'}`}
+                    style={{ fontSize: '0.75rem', padding: '8px 4px', justifyContent: 'center' }}
+                  >
+                    <HelpCircle size={13} />
+                    <span>Investigate</span>
+                  </button>
+                </div>
+
+                <textarea
+                  className="form-input"
+                  rows={2}
+                  placeholder="Reviewer justification or notes..."
+                  value={reviewComment}
+                  onChange={(e) => setReviewComment(e.target.value)}
+                  style={{ fontSize: '0.8rem', resize: 'vertical' }}
+                />
+
                 <button
-                  onClick={() => {
-                    setReviewDecision('accepted');
-                    setShowReviewModal(true);
-                  }}
+                  onClick={handleSaveReview}
+                  disabled={isSavingReview}
                   className="btn btn-primary"
                   style={{ width: '100%', justifyContent: 'center' }}
                 >
-                  <CheckCircle size={15} />
-                  <span>Mark as Reviewed (Confirm Discrepancy)</span>
-                </button>
-
-                <button
-                  onClick={() => {
-                    setReviewDecision('rejected');
-                    setShowReviewModal(true);
-                  }}
-                  className="btn btn-secondary"
-                  style={{ width: '100%', justifyContent: 'center' }}
-                >
-                  <XCircle size={15} />
-                  <span>Dismiss (Not an Issue)</span>
-                </button>
-
-                <button
-                  onClick={() => {
-                    setReviewDecision('reviewing');
-                    setShowReviewModal(true);
-                  }}
-                  className="btn btn-secondary"
-                  style={{ width: '100%', justifyContent: 'center' }}
-                >
-                  <HelpCircle size={15} />
-                  <span>Request Clarification</span>
+                  {isSavingReview ? (
+                    <>
+                      <RefreshCw size={14} className="spin" />
+                      <span>Saving...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Check size={14} />
+                      <span>Save Decision</span>
+                    </>
+                  )}
                 </button>
               </div>
 
               <div
                 style={{
-                  marginTop: 16,
-                  padding: '10px 12px',
+                  marginTop: 14,
+                  padding: '8px 10px',
                   borderRadius: 'var(--ds-radius)',
                   background: 'var(--ds-info-bg)',
                   border: '1px solid rgba(59, 130, 246, 0.2)',
-                  fontSize: '0.75rem',
+                  fontSize: '0.74rem',
                   color: 'var(--ds-info)',
                   display: 'flex',
                   alignItems: 'flex-start',
                   gap: 8,
                 }}
               >
-                <Shield size={16} style={{ flexShrink: 0, marginTop: 1 }} />
+                <Shield size={14} style={{ flexShrink: 0, marginTop: 1 }} />
                 <span>
-                  DocuSentinel Human Review: Reviewing a finding documents human authorization for audit traceability.
+                  All human decisions are permanently recorded in the immutable audit log.
                 </span>
               </div>
             </div>
@@ -696,6 +934,8 @@ function EvidenceViewerContent({ params }: { params: Promise<{ id: string }> }) 
       {/* Review Modal */}
       {showReviewModal && (
         <div
+          role="dialog"
+          aria-modal="true"
           style={{
             position: 'fixed',
             inset: 0,

@@ -53,7 +53,15 @@ Configure the following variables in `.env.local`:
 
 ```env
 # ============================================================
-# Google Gemini API
+# NVIDIA NIM API (OpenAI-Compatible Endpoint)
+# ============================================================
+# Server-side only. Never prefix with NEXT_PUBLIC_
+NVIDIA_API_KEY=your_nvidia_api_key_here
+NVIDIA_BASE_URL=https://integrate.api.nvidia.com/v1
+NVIDIA_MODEL=openai/gpt-oss-20b
+
+# ============================================================
+# Google Gemini API (Fallback AI Document Extraction)
 # ============================================================
 # Server-side only. Never prefix with NEXT_PUBLIC_
 GEMINI_API_KEY=your_gemini_api_key_here
@@ -69,19 +77,57 @@ SUPABASE_SERVICE_ROLE_KEY=your_service_role_key_here
 SUPABASE_STORAGE_BUCKET=documents
 ```
 
-> **Security Note**: `GEMINI_API_KEY` and `SUPABASE_SERVICE_ROLE_KEY` must never be exposed to client-side code.
+> **Security Note**: `NVIDIA_API_KEY`, `GEMINI_API_KEY`, and `SUPABASE_SERVICE_ROLE_KEY` must never be exposed to client-side code, browser storage, or Git.
 
 ---
 
-## 5. Gemini API Setup
+## 5. NVIDIA API Integration & Setup
+
+DocuSentinel AI integrates NVIDIA's OpenAI-compatible NIM endpoint for intelligent document extraction, structured summarization, finding explanations, and cross-document semantic comparison:
+
+### API Configuration
+- **Base URL**: `https://integrate.api.nvidia.com/v1`
+- **Default Model**: `openai/gpt-oss-20b`
+- **SDK**: Official `openai` package configured with NVIDIA's endpoint.
+
+### Configuration Steps
+1. Obtain an API key from the [NVIDIA API Catalog](https://build.nvidia.com/).
+2. Add your credentials to `.env.local`:
+   ```env
+   NVIDIA_API_KEY=nvapi-your-key-here
+   NVIDIA_BASE_URL=https://integrate.api.nvidia.com/v1
+   NVIDIA_MODEL=openai/gpt-oss-20b
+   ```
+3. Restart or start the application (`npm run dev` or `npm run build && npm run start`).
+
+### Key Capabilities
+- **Structured Extraction**: Extracts document type, vendor identity, document IDs, effective and expiry dates, currency, line items, totals, payment terms, legal obligations, and identifies missing mandatory fields.
+- **Document Summarization** (`POST /api/documents/[id]/summarize`): Generates an executive briefing with commercial summary, key points, risk rating, obligations, and missing info.
+- **Evidence-Grounded Explanations** (`POST /api/findings/[id]/explain`): Explains discrepancies using strictly verified source passages without fabricating quotes or page numbers. Clearly flags output as AI-generated (`isAiGenerated: true`).
+- **Semantic Cross-Document Comparison** (`POST /api/reconciliation/compare`): Analyzes semantic consistency across Contracts, POs, and Invoices.
+- **Architectural Safeguards**:
+  - **Prompt Injection Defense**: Document text is isolated inside `<untrusted_document_content>` tags with strict system instructions prohibiting override execution.
+  - **Deterministic Financial Validation**: All monetary totals, variances, tax calculations, and discrepancy decisions remain 100% deterministic in `src/lib/reconciliation/engine.ts`.
+  - **Graceful Multi-Tier Fallback**: If NVIDIA is offline or rate-limited (HTTP 429), the pipeline automatically cascades to Gemini, and then to the deterministic extraction engine without interrupting the user.
+
+### Testing the NVIDIA Integration
+- Run the automated test suite (includes 8 dedicated NVIDIA mock tests):
+  ```bash
+  npm test
+  ```
+  Tests verify successful extraction, malformed JSON recovery, missing credentials handling, provider 401/429 error cascades, summarization, finding explanations, prompt injection defense, and arithmetic determinism — all without consuming live credits or requiring an external network connection.
+
+---
+
+## 6. Gemini API Setup (Secondary Fallback)
 
 1. Obtain an API key from [Google AI Studio](https://aistudio.google.com/).
 2. Set `GEMINI_API_KEY=AIzaSy...` in `.env.local`.
-3. If no key is configured, DocuSentinel AI operates in **Deterministic Fallback Mode**, parsing text directly from document text streams using regex heuristics without fabricating values or failing.
+3. When neither NVIDIA nor Gemini credentials are configured, DocuSentinel AI operates in **Deterministic Fallback Mode**, parsing text directly from document text streams using regex heuristics without fabricating values or failing.
 
 ---
 
-## 6. Supabase Project Setup & Database Migrations
+## 7. Supabase Project Setup & Database Migrations
 
 When connecting to Supabase:
 1. Create a new project in the [Supabase Dashboard](https://database.new).
@@ -103,7 +149,7 @@ When connecting to Supabase:
 
 ---
 
-## 7. Local Development Commands
+## 8. Local Development Commands
 
 ```powershell
 # Start Next.js development server
@@ -127,7 +173,7 @@ npm run start
 
 ---
 
-## 8. Demo Mode Instructions
+## 9. Demo Mode Instructions
 
 DocuSentinel AI includes full offline demo functionality:
 1. No external API keys or cloud database connections are mandatory for local testing.
@@ -137,7 +183,7 @@ DocuSentinel AI includes full offline demo functionality:
 
 ---
 
-## 9. Reconciliation Engine Rules & Logic
+## 10. Reconciliation Engine Rules & Logic
 
 DocuSentinel AI enforces 10 deterministic reconciliation rules:
 1. **Rule 1 — Supplier Matching**: Token-based Jaccard similarity normalizing corporate legal suffixes (`Pvt Ltd`, `LLC`, `Inc`).
@@ -153,18 +199,18 @@ DocuSentinel AI enforces 10 deterministic reconciliation rules:
 
 ---
 
-## 10. Troubleshooting
+## 11. Troubleshooting
 
 | Issue | Resolution |
 |---|---|
 | **EADDRINUSE: 3000** | Run `Stop-Process -Id (Get-NetTCPConnection -LocalPort 3000).OwningProcess -Force` on Windows to free port 3000. |
 | **`pdf-parse` Type Warning** | `@types/pdf-parse` is installed. ESM imports use dynamic `createRequire(import.meta.url)` to guarantee compatibility across Node versions. |
-| **Missing Gemini API Key** | DocuSentinel runs safely in offline fallback mode with genuine parsed text extraction. |
+| **Missing NVIDIA / Gemini API Key** | DocuSentinel runs safely in offline fallback mode with genuine parsed text extraction. |
 | **Database Permissions** | Check that `.data/` directory in project root has write permissions. |
 
 ---
 
-## 11. Known Limitations
+## 12. Known Limitations
 
 - **Scanned Image OCR**: Scanned raster images require an active `GEMINI_API_KEY` for vision-based OCR extraction. Plain-text and searchable PDFs extract offline using `pdf-parse`.
 - **Cross-Currency Arithmetic**: Automatic currency conversion is intentionally disallowed by audit rule; cross-currency documents are flagged for human financial review.

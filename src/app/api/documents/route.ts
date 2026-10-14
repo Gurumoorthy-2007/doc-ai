@@ -1,18 +1,28 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { ServerPersistence } from '@/lib/server/persistence';
-import { validateAndInspectFile, saveFileToStorage } from '@/lib/server/fileStorage';
+import { validateAndInspectFile, saveFileToStorage, deleteFileFromStorage } from '@/lib/server/fileStorage';
 import { extractDocumentWithEvidence } from '@/lib/ai/extraction';
+import { authenticateRequest } from '@/lib/server/auth';
 import type { Document, DocumentCategory } from '@/lib/types';
-
 
 export async function GET(req: NextRequest) {
   try {
+    const auth = await authenticateRequest(req);
+    if (!auth.user) {
+      return NextResponse.json(
+        { success: false, error: auth.error || 'Unauthorized: Authentication required' },
+        { status: auth.status || 401 }
+      );
+    }
+
     const { searchParams } = new URL(req.url);
     const category = searchParams.get('category');
     const status = searchParams.get('status');
     const q = searchParams.get('q');
 
-    let docs = await ServerPersistence.getDocuments();
+    // Filter by user ownership unless admin or reviewer
+    const userIdFilter = auth.user.role === 'admin' || auth.user.role === 'reviewer' ? undefined : auth.user.id;
+    let docs = await ServerPersistence.getDocuments(userIdFilter);
 
     if (category && category !== 'all') {
       docs = docs.filter((d) => d.category === category);
@@ -39,7 +49,19 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
+  let storedPath: string | null = null;
+  let docCreated = false;
+  let docId: string | null = null;
+
   try {
+    const auth = await authenticateRequest(req);
+    if (!auth.user) {
+      return NextResponse.json(
+        { success: false, error: auth.error || 'Unauthorized: Authentication required' },
+        { status: auth.status || 401 }
+      );
+    }
+
     const formData = await req.formData();
     const file = formData.get('file') as File | null;
     const categoryOverride = formData.get('category') as DocumentCategory | null;
@@ -86,15 +108,15 @@ export async function POST(req: NextRequest) {
     }
 
     // 4. Save file securely to private storage
-    const storedPath = await saveFileToStorage(validated.buffer, validated.hash, validated.fileName);
+    storedPath = await saveFileToStorage(validated.buffer, validated.hash, validated.fileName);
 
-    const docId = `doc-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+    docId = `doc-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
     const nowIso = new Date().toISOString();
 
     // 5. Create persistent document record with 'processing' status
     const newDoc: Document = {
       id: docId,
-      user_id: 'usr-demo-admin-001',
+      user_id: auth.user.id,
       file_name: validated.fileName,
       file_path: storedPath,
       file_size: validated.size,
@@ -113,6 +135,7 @@ export async function POST(req: NextRequest) {
     };
 
     await ServerPersistence.createDocument(newDoc);
+    docCreated = true;
 
     // 6. Run genuine AI / deterministic extraction
     try {
@@ -135,10 +158,10 @@ export async function POST(req: NextRequest) {
         processing_completed_at: new Date().toISOString(),
       });
 
-      // Audit event
+      // Audit event with verified user identity
       await ServerPersistence.addAuditEvent({
-        user_name: 'Gurumoorthy S',
-        user_email: 'gurumoorthy@docusentinel.ai',
+        user_name: auth.user.name,
+        user_email: auth.user.email,
         action: 'Document Uploaded & Processed',
         entity_type: 'document',
         entity_id: docId,
@@ -172,6 +195,11 @@ export async function POST(req: NextRequest) {
       );
     }
   } catch (err: unknown) {
+    // If saving file succeeded but document creation failed completely, clean up orphan file
+    if (storedPath && !docCreated) {
+      await deleteFileFromStorage(storedPath).catch(() => {});
+    }
+
     return NextResponse.json(
       { success: false, error: (err as Error).message || 'Upload failed' },
       { status: 400 }

@@ -19,7 +19,7 @@ export type DocumentStatus =
   | 'error';
 
 export type FindingSeverity = 'critical' | 'high' | 'medium' | 'low' | 'info';
-export type FindingStatus = 'open' | 'reviewing' | 'accepted' | 'rejected' | 'resolved';
+export type FindingStatus = 'open' | 'in_review' | 'reviewing' | 'accepted' | 'rejected' | 'resolved';
 
 export type FindingType =
   | 'amount_mismatch'
@@ -148,8 +148,10 @@ export interface Finding {
   compared_document_id: string | null;
   source_value: string | null;
   compared_value: string | null;
+  variance?: number | null;
   financial_impact: number | null;
   currency: string | null;
+  calculation_method?: string | null;
   source_field: string | null;
   source_page: number | null;
   source_text: string | null;
@@ -159,8 +161,16 @@ export interface Finding {
   reviewed_by: string | null;
   reviewed_at: string | null;
   is_reviewed?: boolean;
-  review_decision?: 'accepted' | 'rejected' | 'reviewing' | null;
+  review_decision?: 'accepted' | 'rejected' | 'reviewing' | 'resolved' | null;
   review_comments?: string | null;
+  decision_history?: Array<{
+    decision: 'accepted' | 'rejected' | 'reviewing' | 'resolved' | string;
+    comments: string;
+    reviewed_by?: string;
+    reviewed_at?: string;
+    reviewer?: string;
+    timestamp?: string;
+  }>;
   created_at: string;
   updated_at: string;
   // Joined relations
@@ -205,10 +215,14 @@ export interface ContractExtraction {
   contract_number: string | null;
   parties: string[];
   supplier_name: string | null;
+  customer_name?: string | null;
   contract_value: number | null;
   currency: string | null;
   effective_date: string | null;
   expiry_date: string | null;
+  renewal_date?: string | null;
+  delivery_deadline?: string | null;
+  termination_clause?: string | null;
   payment_terms: string | null;
   deadlines: string[];
   obligations: string[];
@@ -217,11 +231,15 @@ export interface ContractExtraction {
 export interface PurchaseOrderExtraction {
   po_number: string | null;
   supplier_name: string | null;
+  customer_name?: string | null;
+  contract_reference?: string | null;
   currency: string | null;
   order_date: string | null;
   expected_delivery_date: string | null;
+  delivery_deadline?: string | null;
   payment_terms: string | null;
   subtotal: number | null;
+  discount?: number | null;
   tax: number | null;
   total: number | null;
   line_items: Array<{
@@ -236,12 +254,15 @@ export interface PurchaseOrderExtraction {
 export interface InvoiceExtraction {
   invoice_number: string | null;
   supplier_name: string | null;
+  customer_name?: string | null;
+  contract_reference?: string | null;
   invoice_date: string | null;
   due_date: string | null;
   currency: string | null;
   po_reference: string | null;
   payment_terms: string | null;
   subtotal: number | null;
+  discount?: number | null;
   tax: number | null;
   total: number | null;
   line_items: Array<{
@@ -257,6 +278,14 @@ export type ExtractionResult =
   | { type: 'contract'; data: ContractExtraction }
   | { type: 'purchase_order'; data: PurchaseOrderExtraction }
   | { type: 'invoice'; data: InvoiceExtraction };
+
+export interface EnhancedExtractionOutput {
+  result: ExtractionResult;
+  fields: ExtractedField[];
+  lineItems: LineItem[];
+  modelUsed: string;
+  sourceConfidence: number;
+}
 
 // ============================================================
 // Dashboard Statistics

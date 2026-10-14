@@ -2,19 +2,43 @@ import { NextRequest, NextResponse } from 'next/server';
 import { ServerPersistence } from '@/lib/server/persistence';
 import { getFileFromStorage, validateAndInspectFile } from '@/lib/server/fileStorage';
 import { extractDocumentWithEvidence } from '@/lib/ai/extraction';
-
+import { authenticateRequest, checkDocumentOwnership } from '@/lib/server/auth';
 
 export async function POST(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const auth = await authenticateRequest(req);
+    if (!auth.user) {
+      return NextResponse.json(
+        { success: false, error: auth.error || 'Unauthorized: Authentication required' },
+        { status: auth.status || 401 }
+      );
+    }
+
     const { id } = await params;
     const doc = await ServerPersistence.getDocumentById(id);
     if (!doc) {
       return NextResponse.json(
         { success: false, error: `Document ${id} not found` },
         { status: 404 }
+      );
+    }
+
+    // Verify ownership
+    if (!checkDocumentOwnership(auth.user, doc)) {
+      return NextResponse.json(
+        { success: false, error: 'Forbidden: You do not have permission to process this document' },
+        { status: 403 }
+      );
+    }
+
+    // Prevent concurrent duplicate processing
+    if (doc.status === 'processing') {
+      return NextResponse.json(
+        { success: false, error: 'Document is currently being processed. Please wait for the current run to complete.' },
+        { status: 409 }
       );
     }
 
@@ -58,8 +82,8 @@ export async function POST(
     });
 
     await ServerPersistence.addAuditEvent({
-      user_name: 'Gurumoorthy S',
-      user_email: 'gurumoorthy@docusentinel.ai',
+      user_name: auth.user.name,
+      user_email: auth.user.email,
       action: 'Document Re-processed',
       entity_type: 'document',
       entity_id: doc.id,

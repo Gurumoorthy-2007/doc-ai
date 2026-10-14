@@ -25,7 +25,7 @@ import { format } from 'date-fns';
 export default function ReviewQueuePage() {
   const [findings, setFindings] = useState<Finding[]>([]);
   const [selectedFindingId, setSelectedFindingId] = useState<string | null>(null);
-  const [decision, setDecision] = useState<'accepted' | 'rejected' | 'reviewing'>('accepted');
+  const [decision, setDecision] = useState<'accepted' | 'rejected' | 'reviewing' | 'resolved'>('accepted');
   const [comments, setComments] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   const [successMessage, setSuccessMessage] = useState('');
@@ -119,7 +119,7 @@ export default function ReviewQueuePage() {
       </div>
 
       {/* Layout Grid: Queue List on Left, Active Review Workspace on Right */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: 24 }}>
+      <div className="review-queue-layout">
         {/* Left: Queue Items List */}
         <div className="card" style={{ padding: 18, alignSelf: 'start' }}>
           <h3 style={{ fontSize: '0.92rem', fontWeight: 600, color: 'var(--ds-text-primary)', marginBottom: 12 }}>
@@ -201,16 +201,49 @@ export default function ReviewQueuePage() {
                 {activeFinding.reason || activeFinding.description}
               </p>
 
-              {activeFinding.financial_impact !== null && (
-                <div style={{ display: 'flex', gap: 16, background: 'var(--ds-bg)', padding: '10px 16px', borderRadius: 'var(--ds-radius)' }}>
+              {/* Finding Method & Rule Metadata */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 12, background: 'var(--ds-bg)', padding: '12px 16px', borderRadius: 'var(--ds-radius)', marginBottom: 16 }}>
+                <div>
+                  <span style={{ fontSize: '0.72rem', color: 'var(--ds-text-muted)', display: 'block' }}>Rule ID:</span>
+                  <strong style={{ fontSize: '0.82rem', fontFamily: 'monospace', color: 'var(--ds-text-primary)' }}>{activeFinding.rule_id || 'RULE_RECONCILIATION'}</strong>
+                </div>
+                <div>
+                  <span style={{ fontSize: '0.72rem', color: 'var(--ds-text-muted)', display: 'block' }}>Calculation Method:</span>
+                  <span style={{ fontSize: '0.8rem', color: 'var(--ds-text-secondary)' }}>{activeFinding.calculation_method || 'Deterministic comparison rule'}</span>
+                </div>
+                {activeFinding.financial_impact !== null && (
                   <div>
-                    <span style={{ fontSize: '0.72rem', color: 'var(--ds-text-muted)' }}>Variance:</span>{' '}
-                    <strong style={{ color: 'var(--ds-error)' }}>₹ {activeFinding.financial_impact?.toLocaleString('en-IN')}</strong>
+                    <span style={{ fontSize: '0.72rem', color: 'var(--ds-text-muted)', display: 'block' }}>Financial Impact / Variance:</span>
+                    <strong style={{ color: 'var(--ds-error)', fontSize: '0.88rem' }}>
+                      {activeFinding.currency || '₹'} {activeFinding.financial_impact?.toLocaleString('en-IN')}
+                    </strong>
                   </div>
-                  <div>
-                    <span style={{ fontSize: '0.72rem', color: 'var(--ds-text-muted)' }}>Document:</span>{' '}
-                    <strong>{activeFinding.source_document_id || 'INV-5112.pdf'}</strong>
-                  </div>
+                )}
+              </div>
+
+              {/* Verified Evidence Passages */}
+              {(activeFinding.source_text || activeFinding.compared_text) && (
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 12, marginBottom: 16, fontSize: '0.8rem' }}>
+                  {activeFinding.source_text && (
+                    <div style={{ padding: '10px 12px', background: 'var(--ds-surface)', border: '1px solid var(--ds-border)', borderRadius: 'var(--ds-radius)' }}>
+                      <div style={{ fontSize: '0.72rem', fontWeight: 600, color: 'var(--ds-text-muted)', marginBottom: 4 }}>
+                        Source Document Passage (Page {activeFinding.source_page || 1}):
+                      </div>
+                      <div style={{ fontFamily: 'monospace', fontSize: '0.78rem', color: 'var(--ds-text-primary)', whiteSpace: 'pre-wrap' }}>
+                        &ldquo;{activeFinding.source_text}&rdquo;
+                      </div>
+                    </div>
+                  )}
+                  {activeFinding.compared_text && (
+                    <div style={{ padding: '10px 12px', background: 'var(--ds-surface)', border: '1px solid var(--ds-border)', borderRadius: 'var(--ds-radius)' }}>
+                      <div style={{ fontSize: '0.72rem', fontWeight: 600, color: 'var(--ds-text-muted)', marginBottom: 4 }}>
+                        Compared Document Passage (Page {activeFinding.compared_page || 1}):
+                      </div>
+                      <div style={{ fontFamily: 'monospace', fontSize: '0.78rem', color: 'var(--ds-text-primary)', whiteSpace: 'pre-wrap' }}>
+                        &ldquo;{activeFinding.compared_text}&rdquo;
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -240,8 +273,8 @@ export default function ReviewQueuePage() {
                 </div>
               )}
 
-              {/* 3 Review Options */}
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12, marginBottom: 20 }}>
+              {/* 4 Review Options: Confirm, Dismiss, Investigate, Resolve */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(110px, 1fr))', gap: 12, marginBottom: 20 }}>
                 {/* Confirm */}
                 <div
                   onClick={() => setDecision('accepted')}
@@ -278,7 +311,7 @@ export default function ReviewQueuePage() {
                   </div>
                 </div>
 
-                {/* Dismiss */}
+                {/* Dismiss / Reject */}
                 <div
                   onClick={() => setDecision('rejected')}
                   style={{
@@ -310,11 +343,11 @@ export default function ReviewQueuePage() {
                     Dismiss
                   </div>
                   <div style={{ fontSize: '0.72rem', color: 'var(--ds-text-muted)', marginTop: 2 }}>
-                    Not an issue / tolerated
+                    Not an issue / rejected
                   </div>
                 </div>
 
-                {/* Investigate */}
+                {/* Investigate / In Review */}
                 <div
                   onClick={() => setDecision('reviewing')}
                   style={{
@@ -346,7 +379,43 @@ export default function ReviewQueuePage() {
                     Investigate
                   </div>
                   <div style={{ fontSize: '0.72rem', color: 'var(--ds-text-muted)', marginTop: 2 }}>
-                    Needs more context
+                    Needs review context
+                  </div>
+                </div>
+
+                {/* Resolve / Remediate */}
+                <div
+                  onClick={() => setDecision('resolved')}
+                  style={{
+                    padding: 14,
+                    borderRadius: 'var(--ds-radius)',
+                    border: decision === 'resolved' ? '2px solid var(--ds-success)' : '1px solid var(--ds-border)',
+                    background: decision === 'resolved' ? 'rgba(34, 197, 94, 0.05)' : 'var(--ds-surface)',
+                    cursor: 'pointer',
+                    textAlign: 'center',
+                    transition: 'all 0.15s ease',
+                  }}
+                >
+                  <div
+                    style={{
+                      width: 32,
+                      height: 32,
+                      borderRadius: '50%',
+                      background: 'rgba(34, 197, 94, 0.1)',
+                      color: 'var(--ds-success)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      margin: '0 auto 8px',
+                    }}
+                  >
+                    <Check size={18} />
+                  </div>
+                  <div style={{ fontWeight: 600, fontSize: '0.85rem', color: 'var(--ds-text-primary)' }}>
+                    Resolve
+                  </div>
+                  <div style={{ fontSize: '0.72rem', color: 'var(--ds-text-muted)', marginTop: 2 }}>
+                    Remediate & close
                   </div>
                 </div>
               </div>
@@ -389,12 +458,44 @@ export default function ReviewQueuePage() {
                       Finding generated by Reconciliation Engine
                     </div>
                     <div style={{ fontSize: '0.72rem', color: 'var(--ds-text-muted)' }}>
-                      {format(new Date(activeFinding.created_at), 'MMM d, yyyy HH:mm:ss')} • System
+                      {format(new Date(activeFinding.created_at), 'MMM d, yyyy HH:mm:ss')} • System ({activeFinding.rule_id || 'Deterministic Engine'})
                     </div>
                   </div>
                 </div>
 
-                {activeFinding.is_reviewed && (
+                {activeFinding.decision_history && activeFinding.decision_history.length > 0 ? (
+                  activeFinding.decision_history.map((dh, idx) => (
+                    <div key={idx} style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+                      <div
+                        style={{
+                          width: 8,
+                          height: 8,
+                          borderRadius: '50%',
+                          background:
+                            dh.decision === 'accepted'
+                              ? 'var(--ds-teal-500)'
+                              : dh.decision === 'rejected'
+                              ? 'var(--ds-error)'
+                              : dh.decision === 'resolved'
+                              ? 'var(--ds-success)'
+                              : '#eab308',
+                          marginTop: 6,
+                        }}
+                      />
+                      <div>
+                        <div style={{ fontSize: '0.82rem', fontWeight: 600, color: 'var(--ds-text-primary)' }}>
+                          Reviewed by {dh.reviewer || dh.reviewed_by || 'Reviewer'} • Decision: {dh.decision.toUpperCase()}
+                        </div>
+                        <p style={{ fontSize: '0.78rem', color: 'var(--ds-text-secondary)', margin: '2px 0 0 0' }}>
+                          &ldquo;{dh.comments || 'No comment provided'}&rdquo;
+                        </p>
+                        <div style={{ fontSize: '0.72rem', color: 'var(--ds-text-muted)', marginTop: 2 }}>
+                          {format(new Date(dh.timestamp || dh.reviewed_at || new Date().toISOString()), 'MMM d, yyyy HH:mm:ss')}
+                        </div>
+                      </div>
+                    </div>
+                  ))
+                ) : activeFinding.is_reviewed ? (
                   <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
                     <div style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--ds-success)', marginTop: 6 }} />
                     <div>
@@ -409,7 +510,7 @@ export default function ReviewQueuePage() {
                       </div>
                     </div>
                   </div>
-                )}
+                ) : null}
               </div>
             </div>
           </div>
