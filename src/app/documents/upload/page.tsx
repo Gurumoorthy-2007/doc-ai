@@ -19,6 +19,7 @@ import {
   X,
   ArrowRight,
   ShieldCheck,
+  PackageCheck,
 } from 'lucide-react';
 
 interface UploadItem {
@@ -46,6 +47,7 @@ export default function DocumentUploadPage() {
     { key: 'invoice', label: 'Invoices', desc: 'Billing, Invoice', icon: FileText },
     { key: 'purchase_order', label: 'Purchase Orders', desc: 'PO, Work Order', icon: FileCode },
     { key: 'contract', label: 'Contracts', desc: 'Agreement, MSA, SOW', icon: FileCheck },
+    { key: 'goods_receipt', label: 'Goods Receipts', desc: 'GRN, Delivery Note, Warehouse slip', icon: PackageCheck },
     { key: 'receipt', label: 'Receipts', desc: 'Payment slips, receipts', icon: FileText },
     { key: 'statement', label: 'Statements', desc: 'Bank, ledger sheets', icon: FileSpreadsheet },
     { key: 'compliance', label: 'Compliance', desc: 'Certifications, audits', icon: ShieldCheck },
@@ -78,6 +80,7 @@ export default function DocumentUploadPage() {
 
   const inferCategory = (fileName: string): DocumentCategory => {
     const clean = fileName.trim().toLowerCase();
+    if (/(?:^|[\s_.\-])(?:goods[-_]receipt|grn|delivery[-_]note|warehouse[-_]receipt)(?:$|[\s_.\-0-9])/i.test(clean)) return 'goods_receipt';
     if (/(?:^|[\s_.\-])(?:purchase[-_]order|p\.o\.|po)(?:$|[\s_.\-0-9])/i.test(clean)) return 'purchase_order';
     if (/(?:^|[\s_.\-])(?:inv|invoice|bill)(?:$|[\s_.\-0-9])/i.test(clean)) return 'invoice';
     if (/(?:^|[\s_.\-])(?:contract|agreement|msa|sow|nda)(?:$|[\s_.\-0-9])/i.test(clean)) return 'contract';
@@ -203,7 +206,7 @@ export default function DocumentUploadPage() {
           ref={fileInputRef}
           type="file"
           multiple
-          accept=".pdf,.png,.jpg,.jpeg,.tiff,.tif"
+          accept=".pdf,.png,.jpg,.jpeg,.tiff,.tif,.docx,.xlsx"
           onChange={handleFileSelect}
           style={{ display: 'none' }}
         />
@@ -228,7 +231,7 @@ export default function DocumentUploadPage() {
           Drag & drop files here or <span style={{ color: 'var(--ds-teal-500)', textDecoration: 'underline' }}>click to browse</span>
         </h3>
         <p style={{ fontSize: '0.82rem', color: 'var(--ds-text-muted)', marginBottom: 16 }}>
-          Supports PDF, JPG, PNG, TIFF (Max 50MB per file)
+          Supports PDF, Word (.docx), Excel (.xlsx), JPG, PNG, TIFF (Max 50MB per file)
         </p>
 
         <div style={{ display: 'inline-flex', gap: 8 }}>

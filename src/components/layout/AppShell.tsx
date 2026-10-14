@@ -69,6 +69,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     { href: '/findings', label: 'Findings', icon: AlertTriangle, badge: openFindingsCount },
     { href: '/review-queue', label: 'Review Queue', icon: ClipboardCheck, badge: pendingReviewCount },
     { href: '/audit-trail', label: 'Audit Trail', icon: History },
+    { href: '/settings', label: 'Settings', icon: Settings },
   ];
 
   const handleSearchSubmit = (e: React.FormEvent) => {

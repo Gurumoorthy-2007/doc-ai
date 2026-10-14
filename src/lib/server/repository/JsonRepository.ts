@@ -307,6 +307,10 @@ export class JsonRepository implements IRepository {
         ? 'rejected'
         : decision === 'resolved'
         ? 'resolved'
+        : decision === 'disputed'
+        ? 'disputed'
+        : decision === 'escalated'
+        ? 'escalated'
         : 'in_review';
 
     finding.status = nextStatus;

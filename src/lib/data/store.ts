@@ -384,10 +384,10 @@ export class DataStore {
 
   static async saveFindingReviewApi(
     findingId: string,
-    decision: 'accepted' | 'rejected' | 'reviewing' | 'resolved',
+    decision: 'accepted' | 'rejected' | 'reviewing' | 'resolved' | 'disputed' | 'escalated',
     comments: string,
     reviewerName: string = 'Demo Reviewer'
-  ): Promise<Finding | null> {
+  ): Promise<(Finding & { disputeLetter?: import('@/lib/reconciliation/dispute').DisputeLetter | null }) | null> {
     try {
       const res = await fetch(`/api/findings/${findingId}/review`, {
         method: 'POST',
@@ -430,6 +430,7 @@ export class DataStore {
     contractId?: string;
     purchaseOrderId?: string;
     invoiceId?: string;
+    goodsReceiptId?: string;
     groupName?: string;
   }): Promise<{ group: ReconciliationGroup; findings: Finding[] }> {
     const res = await fetch('/api/reconciliation', {

@@ -40,7 +40,7 @@ export async function POST(
       decision = 'reviewing';
     }
 
-    const validDecisions = ['accepted', 'rejected', 'reviewing', 'resolved'];
+    const validDecisions = ['accepted', 'rejected', 'reviewing', 'resolved', 'disputed', 'escalated'];
     if (!decision || !validDecisions.includes(decision)) {
       return NextResponse.json(
         { success: false, error: `Invalid review decision "${decision}". Must be one of: ${validDecisions.join(', ')}.` },
@@ -67,9 +67,22 @@ export async function POST(
       );
     }
 
+    let disputeLetter = null;
+    if (decision === 'disputed') {
+      const { generateVendorDisputeLetter } = await import('@/lib/reconciliation/dispute');
+      disputeLetter = generateVendorDisputeLetter({
+        finding: updated,
+        organizationName: 'DocuSentinel Financial Controls',
+        senderName: verifiedReviewerName,
+      });
+    }
+
     return NextResponse.json({
       success: true,
-      data: updated,
+      data: {
+        ...updated,
+        disputeLetter,
+      },
       message: `Review recorded: ${decision.toUpperCase()}`,
     });
   } catch (err: unknown) {

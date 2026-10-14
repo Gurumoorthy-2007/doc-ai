@@ -65,6 +65,7 @@ function DocumentsContent() {
     { key: 'invoice', label: 'Invoices', count: documents.filter((d) => d.category === 'invoice').length },
     { key: 'purchase_order', label: 'Purchase Orders', count: documents.filter((d) => d.category === 'purchase_order').length },
     { key: 'contract', label: 'Contracts', count: documents.filter((d) => d.category === 'contract').length },
+    { key: 'goods_receipt', label: 'Goods Receipts (GRN)', count: documents.filter((d) => d.category === 'goods_receipt').length },
     { key: 'receipt', label: 'Receipts', count: documents.filter((d) => d.category === 'receipt').length },
     { key: 'statement', label: 'Statements', count: documents.filter((d) => d.category === 'statement').length },
     { key: 'compliance', label: 'Compliance', count: documents.filter((d) => d.category === 'compliance').length },

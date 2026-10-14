@@ -36,11 +36,12 @@ export async function POST(req: NextRequest) {
     }
 
     const body = await req.json().catch(() => ({}));
-    const { contractId, purchaseOrderId, invoiceId, groupName } = body;
+    const { contractId, purchaseOrderId, invoiceId, goodsReceiptId, groupName } = body;
 
     const allDocs = await ServerPersistence.getDocuments();
     const allFields = await ServerPersistence.getExtractedFields();
     const allLineItems = await ServerPersistence.getLineItems();
+    const orgConfig = await ServerPersistence.getOrgConfig(auth.user.organization_id || 'default_org');
 
     const buildDocData = (id?: string | null): DocumentData | null => {
       if (!id) return null;
@@ -70,11 +71,13 @@ export async function POST(req: NextRequest) {
     let contractDoc: DocumentData | null = null;
     let poDoc: DocumentData | null = null;
     let invoiceDoc: DocumentData | null = null;
+    let grnDoc: DocumentData | null = null;
 
     try {
       contractDoc = buildDocData(contractId);
       poDoc = buildDocData(purchaseOrderId);
       invoiceDoc = buildDocData(invoiceId);
+      grnDoc = buildDocData(goodsReceiptId);
     } catch (authErr: unknown) {
       const msg = (authErr as Error)?.message || '';
       if (typeof msg === 'string' && msg.startsWith('FORBIDDEN_DOC_')) {
@@ -92,10 +95,12 @@ export async function POST(req: NextRequest) {
       const invoices = userAccessibleDocs.filter((d) => d.category === 'invoice');
       const pos = userAccessibleDocs.filter((d) => d.category === 'purchase_order');
       const contracts = userAccessibleDocs.filter((d) => d.category === 'contract');
+      const grns = userAccessibleDocs.filter((d) => d.category === 'goods_receipt');
 
       if (invoices.length > 0) invoiceDoc = buildDocData(invoices[0].id);
       if (pos.length > 0) poDoc = buildDocData(pos[0].id);
       if (contracts.length > 0) contractDoc = buildDocData(contracts[0].id);
+      if (grns.length > 0) grnDoc = buildDocData(grns[0].id);
     }
 
     if (!contractDoc && !poDoc && !invoiceDoc) {
@@ -105,10 +110,44 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    // Prepare other invoices for cumulative tracking
+    const otherInvoices = allDocs
+      .filter((d) => d.category === 'invoice' && (!invoiceDoc || d.id !== invoiceDoc.id))
+      .map((d) => {
+        const invFields = allFields.filter((f) => f.document_id === d.id);
+        const getF = (n: string) => invFields.find((f) => f.field_name === n)?.field_value ?? null;
+        const getNum = (n: string) => {
+          const v = getF(n);
+          if (!v) return null;
+          const c = parseFloat(v.replace(/[^0-9.-]/g, ''));
+          return isNaN(c) ? null : c;
+        };
+        return {
+          id: d.id,
+          number: getF('invoice_number') || '',
+          supplier: getF('supplier_name') || '',
+          po_number: getF('purchase_order_number') || undefined,
+          total: getNum('total'),
+          date: getF('invoice_date') || '',
+        };
+      });
+
+    const existingInvoices = otherInvoices.map((inv) => ({
+      id: inv.id,
+      invoice_number: inv.number,
+      po_number: inv.po_number,
+      total_amount: inv.total || 0,
+      invoice_date: inv.date,
+    }));
+
     const groupId = `rec-grp-${Date.now()}-${Math.random().toString(36).substring(2, 5)}`;
     const nowIso = new Date().toISOString();
 
-    const reconResult = reconcileDocuments(contractDoc, poDoc, invoiceDoc, groupId);
+    const reconResult = reconcileDocuments(contractDoc, poDoc, invoiceDoc, grnDoc, {
+      groupId,
+      config: orgConfig || undefined,
+      existingInvoices,
+    });
 
     const newGroup: ReconciliationGroup = {
       id: groupId,
@@ -117,6 +156,7 @@ export async function POST(req: NextRequest) {
       contract_id: contractDoc?.id ?? null,
       purchase_order_id: poDoc?.id ?? null,
       invoice_id: invoiceDoc?.id ?? null,
+      goods_receipt_id: grnDoc?.id ?? null,
       status: reconResult.status,
       contract_value: reconResult.contractValue,
       po_value: reconResult.poValue,

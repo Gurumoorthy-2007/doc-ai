@@ -7,6 +7,7 @@ export interface AuthenticatedUser {
   email: string;
   name: string;
   role: 'admin' | 'reviewer' | 'user';
+  organization_id?: string;
 }
 
 function isSupabaseConfigured(): boolean {

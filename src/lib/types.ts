@@ -20,7 +20,7 @@ export type DocumentStatus =
   | 'error';
 
 export type FindingSeverity = 'critical' | 'high' | 'medium' | 'low' | 'info';
-export type FindingStatus = 'open' | 'in_review' | 'reviewing' | 'accepted' | 'rejected' | 'resolved';
+export type FindingStatus = 'open' | 'in_review' | 'reviewing' | 'accepted' | 'rejected' | 'resolved' | 'disputed' | 'escalated';
 
 export type FindingType =
   | 'amount_mismatch'
@@ -130,6 +130,7 @@ export interface ReconciliationGroup {
   contract_id: string | null;
   purchase_order_id: string | null;
   invoice_id: string | null;
+  goods_receipt_id?: string | null;
   status: ReconciliationStatus;
   contract_value: number | null;
   po_value: number | null;
@@ -145,6 +146,7 @@ export interface ReconciliationGroup {
   contract?: Document | null;
   purchase_order?: Document | null;
   invoice?: Document | null;
+  goods_receipt?: Document | null;
 }
 
 export interface Finding {
@@ -179,10 +181,10 @@ export interface Finding {
   reviewed_by: string | null;
   reviewed_at: string | null;
   is_reviewed?: boolean;
-  review_decision?: 'accepted' | 'rejected' | 'reviewing' | 'resolved' | null;
+  review_decision?: 'accepted' | 'rejected' | 'reviewing' | 'resolved' | 'disputed' | 'escalated' | null;
   review_comments?: string | null;
   decision_history?: Array<{
-    decision: 'accepted' | 'rejected' | 'reviewing' | 'resolved' | string;
+    decision: 'accepted' | 'rejected' | 'reviewing' | 'resolved' | 'disputed' | 'escalated' | string;
     comments: string;
     reviewed_by?: string;
     reviewed_at?: string;
@@ -332,15 +334,26 @@ export interface ExistingInvoiceSummary {
 }
 
 export interface OrganizationConfig {
-  org_id: string;
+  org_id?: string;
   org_name?: string;
+  organization_id?: string;
   price_tolerance_percentage?: number; // e.g. 0.05 for 0.05%
+  price_tolerance_pct?: number; // alias
   amount_tolerance_absolute?: number; // e.g. 1.00
+  amount_tolerance_abs?: number; // alias
   quantity_tolerance_percentage?: number; // e.g. 0.0
+  qty_tolerance_pct?: number; // alias
   require_four_way_matching?: boolean; // default false
+  require_grn?: boolean; // alias
   require_hsn_codes?: boolean; // default false
   annual_cost_of_capital_rate?: number; // e.g. 0.12 (12%)
+  cost_of_capital_annual_rate?: number; // alias
+  enforce_gstin_checksum?: boolean;
   enabled_rules?: string[]; // If empty or undefined, all rules are enabled
+  buyer_gstin?: string;
+  buyer_state_code?: string;
+  currency_default?: string;
+  updated_at?: string;
 }
 
 export interface EnhancedExtractionOutput {

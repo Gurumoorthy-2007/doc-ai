@@ -24,6 +24,9 @@ import {
   Calculator,
   ShieldCheck,
   Zap,
+  Download,
+  Printer,
+  PackageCheck,
 } from 'lucide-react';
 import { format } from 'date-fns';
 
@@ -39,9 +42,11 @@ export default function ReconciliationPage() {
   const [contractDoc, setContractDoc] = useState<Document | null>(null);
   const [poDoc, setPoDoc] = useState<Document | null>(null);
   const [invoiceDoc, setInvoiceDoc] = useState<Document | null>(null);
+  const [grnDoc, setGrnDoc] = useState<Document | null>(null);
   const [contractFields, setContractFields] = useState<Record<string, ExtractedField>>({});
   const [poFields, setPoFields] = useState<Record<string, ExtractedField>>({});
   const [invoiceFields, setInvoiceFields] = useState<Record<string, ExtractedField>>({});
+  const [grnFields, setGrnFields] = useState<Record<string, ExtractedField>>({});
   const [groupFindings, setGroupFindings] = useState<Finding[]>([]);
 
   // AI Semantic Analysis state
@@ -71,10 +76,14 @@ export default function ReconciliationPage() {
     const cDoc = selectedGroup.contract_id ? allDocs.find((d) => d.id === selectedGroup.contract_id) || null : null;
     const pDoc = selectedGroup.purchase_order_id ? allDocs.find((d) => d.id === selectedGroup.purchase_order_id) || null : null;
     const iDoc = selectedGroup.invoice_id ? allDocs.find((d) => d.id === selectedGroup.invoice_id) || null : null;
+    const gDoc = (selectedGroup as any).goods_receipt_id
+      ? allDocs.find((d) => d.id === (selectedGroup as any).goods_receipt_id) || null
+      : allDocs.find((d) => d.category === 'goods_receipt') || null;
 
     setContractDoc(cDoc);
     setPoDoc(pDoc);
     setInvoiceDoc(iDoc);
+    setGrnDoc(gDoc);
 
     const toFieldMap = (docId?: string | null) => {
       if (!docId) return {};
@@ -89,6 +98,7 @@ export default function ReconciliationPage() {
     setContractFields(toFieldMap(selectedGroup.contract_id));
     setPoFields(toFieldMap(selectedGroup.purchase_order_id));
     setInvoiceFields(toFieldMap(selectedGroup.invoice_id));
+    setGrnFields(toFieldMap(gDoc?.id));
 
     // Resolve findings for this group
     const allFindings = DataStore.getFindings();
@@ -121,7 +131,13 @@ export default function ReconciliationPage() {
   const handleRunReconciliation = async () => {
     setIsReconciling(true);
     try {
-      const res = await DataStore.runReconciliationApi();
+      const res = await DataStore.runReconciliationApi({
+        contractId: selectedGroup?.contract_id || undefined,
+        purchaseOrderId: selectedGroup?.purchase_order_id || undefined,
+        invoiceId: selectedGroup?.invoice_id || undefined,
+        goodsReceiptId: (selectedGroup as any)?.goods_receipt_id || undefined,
+        groupName: selectedGroup?.name || undefined,
+      });
       const updatedList = await DataStore.fetchReconciliations();
       setGroups(updatedList);
       if (res.group) {
@@ -255,7 +271,33 @@ export default function ReconciliationPage() {
           </p>
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+          {selectedGroup && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <a
+                href={`/api/reconciliation/${selectedGroup.id}/export?format=csv`}
+                download
+                className="btn btn-secondary"
+                style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: '0.8rem', padding: '6px 12px' }}
+                title="Download CSV report for ERP accounting systems"
+              >
+                <Download size={14} />
+                <span>Export CSV</span>
+              </a>
+              <a
+                href={`/api/reconciliation/${selectedGroup.id}/export?format=html`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="btn btn-secondary"
+                style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: '0.8rem', padding: '6px 12px' }}
+                title="Print formal Audit Certificate or save to PDF"
+              >
+                <Printer size={14} />
+                <span>Print Audit Pack</span>
+              </a>
+            </div>
+          )}
+
           <button
             onClick={handleTriggerAiComparison}
             className="btn btn-secondary"
@@ -273,7 +315,7 @@ export default function ReconciliationPage() {
             disabled={isReconciling}
           >
             <RefreshCw size={15} className={isReconciling ? 'spin' : ''} />
-            <span>{isReconciling ? 'Reconciling...' : 'Run 3-Way Match'}</span>
+            <span>{isReconciling ? 'Reconciling...' : 'Run 4-Way Match'}</span>
           </button>
         </div>
       </div>

@@ -10,7 +10,7 @@ import type {
 import type { CaseHistoryItem } from '@/lib/data/seedData';
 import type { ChainVerificationResult } from '@/lib/server/auditChain';
 
-export type FindingReviewDecision = 'accepted' | 'rejected' | 'reviewing' | 'resolved';
+export type FindingReviewDecision = 'accepted' | 'rejected' | 'reviewing' | 'resolved' | 'disputed' | 'escalated';
 
 export interface IRepository {
   // Documents

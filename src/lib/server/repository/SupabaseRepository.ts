@@ -209,6 +209,10 @@ export class SupabaseRepository implements IRepository {
         ? 'rejected'
         : decision === 'resolved'
         ? 'resolved'
+        : decision === 'disputed'
+        ? 'disputed'
+        : decision === 'escalated'
+        ? 'escalated'
         : 'in_review';
 
     const history = finding.decision_history ? [...finding.decision_history] : [];
