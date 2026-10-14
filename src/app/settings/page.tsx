@@ -14,7 +14,6 @@ import {
   RotateCcw,
   Building2,
   FileCheck2,
-  HelpCircle,
 } from 'lucide-react';
 import type { OrganizationConfig } from '@/lib/types';
 
@@ -483,7 +482,7 @@ export default function SettingsPage() {
                   style={{ width: 120, fontSize: '1.1rem', fontWeight: 600 }}
                 />
                 <span style={{ fontSize: '0.9rem', color: 'var(--text-muted)' }}>
-                  ({(config.cost_of_capital_annual_rate * 100).toFixed(1)}% p.a.)
+                  ({((config.cost_of_capital_annual_rate ?? 0.12) * 100).toFixed(1)}% p.a.)
                 </span>
               </div>
               <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: 8 }}>

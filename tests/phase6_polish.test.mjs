@@ -77,8 +77,8 @@ test('Phase 6 Polish 2: Finding Status Transition to Disputed and Escalated', as
     rule_id: 'RULE_GRN_QUANTITY_MISMATCH',
     description: 'Invoice billed 100 units but Goods Receipt Note shows only 85 received.',
     reason: 'Short delivery',
-    source_document_id: 'doc-inv',
-    compared_document_id: 'doc-grn',
+    source_document_id: `doc-inv-${findingId}`,
+    compared_document_id: `doc-grn-${findingId}`,
     source_value: '100',
     compared_value: '85',
     variance: 15,
@@ -187,5 +187,5 @@ test('Phase 6 Polish 4: Reconciliation Group Status and Audit Chain Verification
 
   // Check audit chain validity
   const auditVerification = await ServerPersistence.verifyAuditChain();
-  assert.equal(auditVerification.valid, true, 'Audit chain must be cryptographically valid');
+  assert.equal(auditVerification.verified, true, 'Audit chain must be cryptographically valid');
 });

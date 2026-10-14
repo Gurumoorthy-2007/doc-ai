@@ -136,6 +136,8 @@ export async function POST(req: NextRequest) {
       id: inv.id,
       invoice_number: inv.number,
       po_number: inv.po_number,
+      po_reference: inv.po_number || null,
+      total: inv.total || 0,
       total_amount: inv.total || 0,
       invoice_date: inv.date,
     }));

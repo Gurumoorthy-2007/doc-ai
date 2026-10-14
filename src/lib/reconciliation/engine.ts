@@ -33,6 +33,8 @@ export interface ReconciliationOptions {
   existingInvoices?: ExistingInvoiceSummary[];
   config?: OrganizationConfig;
   requireFourWayMatching?: boolean;
+  groupId?: string;
+  reconGroupId?: string;
 }
 
 export interface ReconciliationResult {
@@ -364,7 +366,7 @@ export function reconcileDocuments(
   contract: DocumentData | null,
   purchaseOrder: DocumentData | null,
   invoice: DocumentData | null,
-  reconGroupId?: string,
+  reconGroupIdOrGoodsReceiptOrOptions?: string | DocumentData | null | ReconciliationOptions,
   goodsReceiptOrOptions?: DocumentData | null | ReconciliationOptions,
   maybeOptions?: ReconciliationOptions
 ): ReconciliationResult {
@@ -372,19 +374,32 @@ export function reconcileDocuments(
   let overallStatus: ReconciliationStatus = 'matched';
 
   // Normalize parameters
+  let reconGroupId: string | undefined = undefined;
   let goodsReceipt: DocumentData | null = null;
   let options: ReconciliationOptions | undefined = maybeOptions;
 
+  if (typeof reconGroupIdOrGoodsReceiptOrOptions === 'string') {
+    reconGroupId = reconGroupIdOrGoodsReceiptOrOptions;
+  } else if (reconGroupIdOrGoodsReceiptOrOptions && typeof reconGroupIdOrGoodsReceiptOrOptions === 'object') {
+    if ('category' in reconGroupIdOrGoodsReceiptOrOptions) {
+      goodsReceipt = reconGroupIdOrGoodsReceiptOrOptions as DocumentData;
+    } else {
+      options = reconGroupIdOrGoodsReceiptOrOptions as ReconciliationOptions;
+    }
+  }
+
   if (goodsReceiptOrOptions) {
-    if ('fields' in goodsReceiptOrOptions && 'category' in goodsReceiptOrOptions) {
+    if ('category' in goodsReceiptOrOptions) {
       goodsReceipt = goodsReceiptOrOptions as DocumentData;
     } else {
       options = goodsReceiptOrOptions as ReconciliationOptions;
-      if (options.goodsReceipt) {
-        goodsReceipt = options.goodsReceipt;
-      }
     }
   }
+
+  if (options?.goodsReceipt) {
+    goodsReceipt = options.goodsReceipt;
+  }
+  reconGroupId = reconGroupId || options?.reconGroupId || options?.groupId;
 
   const config = options?.config;
   const existingInvoices = options?.existingInvoices || [];

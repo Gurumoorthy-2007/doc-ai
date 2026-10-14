@@ -17,8 +17,6 @@ import {
   Shield,
   ArrowRight,
   Eye,
-  FileText,
-  AlertTriangle,
   History,
   Check,
   Send,
@@ -229,6 +227,13 @@ export default function ReviewQueuePage() {
               style={{ padding: '4px 8px', fontSize: '0.72rem' }}
             >
               Escalated ({escalatedQueue.length})
+            </button>
+            <button
+              onClick={() => setStatusFilter('resolved')}
+              className={`btn btn-sm ${statusFilter === 'resolved' ? 'btn-primary' : 'btn-secondary'}`}
+              style={{ padding: '4px 8px', fontSize: '0.72rem' }}
+            >
+              Resolved ({resolvedQueue.length})
             </button>
             <button
               onClick={() => setStatusFilter('all')}

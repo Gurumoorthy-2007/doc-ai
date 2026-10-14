@@ -535,7 +535,8 @@ export class JsonRepository implements IRepository {
   async saveOrgConfig(config: OrganizationConfig): Promise<OrganizationConfig> {
     const db = await readDatabase();
     if (!db.org_configs) db.org_configs = {};
-    db.org_configs[config.org_id] = config;
+    const key = config.org_id || config.organization_id || 'default_org';
+    db.org_configs[key] = config;
     await writeDatabase(db);
     return config;
   }

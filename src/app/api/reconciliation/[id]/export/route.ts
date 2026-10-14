@@ -62,8 +62,8 @@ export async function GET(
             email: auth.user.email,
             role: auth.user.role,
           },
-          auditChainValid: auditChain.valid,
-          totalChainEvents: auditChain.totalEvents,
+          auditChainValid: auditChain.verified,
+          totalChainEvents: auditChain.count,
         },
         reconciliationGroup: group,
         documents: {
@@ -148,9 +148,9 @@ export async function GET(
 
     // Default: Printable HTML / PDF report
     const htmlReport = generatePrintableHtmlReport(group, groupFindings, {
-      contract: contractDoc,
-      purchaseOrder: poDoc,
-      invoice: invoiceDoc,
+      contract: contractDoc ?? null,
+      purchaseOrder: poDoc ?? null,
+      invoice: invoiceDoc ?? null,
       exporterName: auth.user.name,
     });
 

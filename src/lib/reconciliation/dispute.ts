@@ -91,7 +91,7 @@ REFERENCE: ${refNum}
 
 Dear Accounts Receivable Team,
 
-During our automated and human-in-the-loop pre-payment three-way audit, an itemized discrepancy was flagged on Invoice ${invoiceNumber} against our authorized Purchase Order ${poNumber} and contract terms.
+During our automated and human-in-the-loop pre-payment three-way audit, an itemized discrepancy was flagged on Invoice ${invoiceNumber} against our authorized Purchase Order ${poNumber} and contract terms (${contractNumber}).
 
 Pursuant to standard commercial audit controls, payment on the disputed portion of this invoice has been placed on hold pending formal resolution.
 
