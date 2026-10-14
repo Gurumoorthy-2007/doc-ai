@@ -61,7 +61,11 @@ export function detectMimeType(buffer: Buffer, fileName: string): string | null 
   return null;
 }
 
-const STORAGE_DIR = path.join(process.cwd(), '.data', 'storage');
+import os from 'os';
+
+const STORAGE_DIR = process.env.VERCEL
+  ? path.join(os.tmpdir(), 'docusentinel', '.data', 'storage')
+  : path.join(process.cwd(), '.data', 'storage');
 
 async function ensureStorageDir(): Promise<string> {
   await fs.mkdir(STORAGE_DIR, { recursive: true });
