@@ -29,6 +29,10 @@ export async function POST(req: NextRequest) {
     }
 
     const body = await req.json().catch(() => ({}));
+    const { contractId, purchaseOrderId, invoiceId } = body;
+
+    const userIdFilter = auth.user.role === 'admin' || auth.user.role === 'reviewer' ? undefined : auth.user.id;
+    const allDocs = await ServerPersistence.getDocuments(userIdFilter);
     const allFields = await ServerPersistence.getExtractedFields();
 
     const getDocFieldsMap = (docId?: string) => {

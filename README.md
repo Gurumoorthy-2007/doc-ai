@@ -33,7 +33,7 @@ Open PowerShell or Command Prompt in the project folder:
 
 ```powershell
 # Navigate into project directory
-cd "c:\Users\gurum\Desktop\doc ai\docusentinel"
+cd docusentinel
 
 # Install dependencies using lockfile
 npm ci

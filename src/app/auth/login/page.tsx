@@ -52,7 +52,7 @@ export default function LoginPage() {
   };
 
   const handleQuickDemoFill = () => {
-    setEmail('gurumoorthy@docusentinel.ai');
+    setEmail('demo@docusentinel.local');
     setPassword('demo-password-123');
     setError('');
   };
@@ -138,7 +138,7 @@ export default function LoginPage() {
           >
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.8rem', color: '#0f766e', fontWeight: 500 }}>
               <Sparkles size={14} color="#0d9488" />
-              <span>1-Click Demo Login: <strong>gurumoorthy@docusentinel.ai</strong></span>
+              <span>1-Click Demo Login: <strong>demo@docusentinel.local</strong></span>
             </div>
             <ArrowRight size={14} color="#0d9488" />
           </div>

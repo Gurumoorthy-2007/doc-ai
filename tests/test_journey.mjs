@@ -223,7 +223,7 @@ Bank: HDFC Bank Limited
     body: JSON.stringify({
       decision: 'accepted',
       comments: 'Variance of ₹70,000 verified against signed amendment for expedited delivery; approved by finance manager.',
-      reviewerName: 'Gurumoorthy S (Lead Auditor)',
+      reviewerName: 'Demo Reviewer (Lead Auditor)',
     }),
   });
 

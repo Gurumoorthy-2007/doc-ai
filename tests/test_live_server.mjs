@@ -72,7 +72,7 @@ async function runLiveVerification() {
       body: JSON.stringify({
         decision: 'accepted',
         comments: 'Verified discrepancy via live API test',
-        reviewerName: 'Gurumoorthy S',
+        reviewerName: 'Demo Reviewer',
       }),
     });
     console.log('   Review Result:', JSON.stringify({
