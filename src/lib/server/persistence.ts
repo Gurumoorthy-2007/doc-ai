@@ -12,6 +12,7 @@ import type {
   Finding,
   DashboardStats,
   AuditEvent,
+  OrganizationConfig,
 } from '@/lib/types';
 import type { CaseHistoryItem } from '@/lib/data/seedData';
 import { getRepository, type FindingReviewDecision } from './repository';
@@ -147,6 +148,15 @@ export class ServerPersistence {
     userRole?: string
   ): Promise<boolean> {
     return getRepository().canUserAccessFinding(userId, findingId, userRole);
+  }
+
+  // Organization Configuration
+  static async getOrgConfig(orgId?: string): Promise<OrganizationConfig | null> {
+    return getRepository().getOrgConfig(orgId);
+  }
+
+  static async saveOrgConfig(config: OrganizationConfig): Promise<OrganizationConfig> {
+    return getRepository().saveOrgConfig(config);
   }
 
   // Reset

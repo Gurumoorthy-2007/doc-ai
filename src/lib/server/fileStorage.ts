@@ -27,6 +27,7 @@ const MAGIC_BYTES = {
   jpeg: [0xff, 0xd8, 0xff],
   tiff_le: [0x49, 0x49, 0x2a, 0x00],
   tiff_be: [0x4d, 0x4d, 0x00, 0x2a],
+  zip: [0x50, 0x4b, 0x03, 0x04], // PK\x03\x04 (Used by .docx and .xlsx)
 };
 
 function checkMagicBytes(buffer: Buffer, expected: number[]): boolean {
@@ -51,6 +52,10 @@ export function detectMimeType(buffer: Buffer, fileName: string): string | null 
   }
   if (checkMagicBytes(buffer, MAGIC_BYTES.tiff_le) || checkMagicBytes(buffer, MAGIC_BYTES.tiff_be)) {
     if (ext === '.tif' || ext === '.tiff') return 'image/tiff';
+  }
+  if (checkMagicBytes(buffer, MAGIC_BYTES.zip)) {
+    if (ext === '.docx') return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+    if (ext === '.xlsx') return 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
   }
 
   return null;
@@ -91,10 +96,10 @@ export async function validateAndInspectFile(
 
   // 3. Extension check
   const ext = path.extname(sanitizedFileName).toLowerCase();
-  const allowedExtensions = ['.pdf', '.png', '.jpg', '.jpeg', '.tiff', '.tif'];
+  const allowedExtensions = ['.pdf', '.png', '.jpg', '.jpeg', '.tiff', '.tif', '.docx', '.xlsx'];
   if (!allowedExtensions.includes(ext)) {
     throw new Error(
-      `Unsupported file format "${ext}". Supported formats are PDF, PNG, JPG, JPEG, and TIFF.`
+      `Unsupported file format "${ext}". Supported formats are PDF, PNG, JPG, JPEG, TIFF, DOCX, and XLSX.`
     );
   }
 
@@ -145,6 +150,49 @@ export async function validateAndInspectFile(
       extractedText = strings.join(' ').trim();
       pageCount = 1;
       pageTexts.push(extractedText);
+    }
+  } else if (detectedMime === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
+    try {
+      const mammoth = require('mammoth');
+      const result = await mammoth.extractRawText({ buffer });
+      extractedText = result.value ? result.value.trim() : '';
+      pageCount = 1;
+      pageTexts.push(extractedText);
+    } catch {
+      extractedText = '';
+      pageCount = 1;
+      pageTexts.push('');
+    }
+  } else if (detectedMime === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet') {
+    try {
+      const ExcelJS = require('exceljs');
+      const workbook = new ExcelJS.Workbook();
+      await workbook.xlsx.load(buffer);
+      const sheetLines: string[] = [];
+      workbook.eachSheet((worksheet: { name?: string }, sheetId: number) => {
+        sheetLines.push(`--- Sheet: ${worksheet.name || `Sheet${sheetId}`} ---`);
+        (worksheet as { eachRow: (opt: { includeEmpty: boolean }, cb: (row: { values?: unknown }) => void) => void }).eachRow(
+          { includeEmpty: false },
+          (row) => {
+            const rowValues = Array.isArray(row.values)
+              ? row.values
+                  .slice(1)
+                  .map((v) => (v === null || v === undefined ? '' : typeof v === 'object' && 'text' in (v as Record<string, unknown>) ? String((v as { text: unknown }).text) : String(v)))
+                  .filter((s: string) => s.length > 0)
+              : [];
+            if (rowValues.length > 0) {
+              sheetLines.push(rowValues.join('\t'));
+            }
+          }
+        );
+      });
+      extractedText = sheetLines.join('\n').trim();
+      pageCount = Math.max(1, workbook.worksheets.length);
+      pageTexts.push(extractedText);
+    } catch {
+      extractedText = '';
+      pageCount = 1;
+      pageTexts.push('');
     }
   } else {
     // Images: page count is 1. Text is extracted via OCR in AI extraction

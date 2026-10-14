@@ -62,4 +62,8 @@ export interface IRepository {
   canUserAccessDocument(userId?: string, docId?: string, userRole?: string): Promise<boolean>;
   canUserAccessFinding(userId?: string, findingId?: string, userRole?: string): Promise<boolean>;
   resetData(): Promise<void>;
+
+  // Organization Configuration
+  getOrgConfig(orgId?: string): Promise<import('@/lib/types').OrganizationConfig | null>;
+  saveOrgConfig(config: import('@/lib/types').OrganizationConfig): Promise<import('@/lib/types').OrganizationConfig>;
 }

@@ -8,6 +8,7 @@ import type {
   FindingStatus,
   DashboardStats,
   AuditEvent,
+  OrganizationConfig,
 } from '@/lib/types';
 import type { CaseHistoryItem } from '@/lib/data/seedData';
 import {
@@ -413,5 +414,14 @@ export class SupabaseRepository implements IRepository {
 
   async resetData(): Promise<void> {
     // No-op or truncate for Supabase
+  }
+
+  async getOrgConfig(orgId: string = 'default'): Promise<OrganizationConfig | null> {
+    void orgId;
+    return null;
+  }
+
+  async saveOrgConfig(config: OrganizationConfig): Promise<OrganizationConfig> {
+    return config;
   }
 }

@@ -91,6 +91,20 @@ const CATEGORY_RULES: CategoryRule[] = [
       /\b(?:audit\s+report|attestation|regulatory\s+compliance|certification\s+body)\b/i,
     ],
   },
+  {
+    category: 'goods_receipt',
+    primaryPatterns: [
+      /\b(?:goods\s+receipt\s+note|goods\s+receipt|grn\s*#|grn\s+no|grn\s+number|material\s+receipt|receiving\s+slip|delivery\s+challan|receiving\s+report)\b/i,
+      /\b(?:warehouse\s+receipt|inspection\s+and\s+acceptance|goods\s+received\s+note)\b/i,
+    ],
+    secondaryPatterns: [
+      /\b(?:quantity\s+received|accepted\s+quantity|rejected\s+quantity|received\s+by|inspected\s+by|store\s+keeper|gate\s+entry)\b/i,
+      /\b(?:delivery\s+challan|consignment\s+note|dock\s+receipt|damage\s+report)\b/i,
+    ],
+    negativePatterns: [
+      /\b(?:tax\s+invoice|commercial\s+invoice|proforma\s+invoice)\b/i,
+    ],
+  },
 ];
 
 /**
@@ -113,6 +127,9 @@ function classifyFileName(fileName?: string): { category: DocumentCategory; conf
   }
   if (/(?:^|[\s_.\-])(?:receipt)(?:$|[\s_.\-0-9])/i.test(clean)) {
     return { category: 'receipt', confidence: 0.65 };
+  }
+  if (/(?:^|[\s_.\-])(?:grn|goods[-_]receipt|challan|receiving[-_]slip)(?:$|[\s_.\-0-9])/i.test(clean)) {
+    return { category: 'goods_receipt', confidence: 0.65 };
   }
   if (/(?:^|[\s_.\-])(?:statement)(?:$|[\s_.\-0-9])/i.test(clean)) {
     return { category: 'statement', confidence: 0.65 };
@@ -144,6 +161,7 @@ export function classifyDocumentContent(
     invoice: { score: 0, primaryMatches: 0, matches: [] },
     purchase_order: { score: 0, primaryMatches: 0, matches: [] },
     contract: { score: 0, primaryMatches: 0, matches: [] },
+    goods_receipt: { score: 0, primaryMatches: 0, matches: [] },
     receipt: { score: 0, primaryMatches: 0, matches: [] },
     statement: { score: 0, primaryMatches: 0, matches: [] },
     compliance: { score: 0, primaryMatches: 0, matches: [] },

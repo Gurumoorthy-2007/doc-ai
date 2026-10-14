@@ -9,6 +9,7 @@ import type {
   FindingStatus,
   DashboardStats,
   AuditEvent,
+  OrganizationConfig,
 } from '@/lib/types';
 import {
   INITIAL_DOCUMENTS,
@@ -40,6 +41,7 @@ interface DatabaseSchema {
   findings: Finding[];
   audit_events: AuditEvent[];
   case_history: CaseHistoryItem[];
+  org_configs?: Record<string, OrganizationConfig>;
   initialized_at: string;
 }
 
@@ -56,6 +58,7 @@ function getDefaultDatabase(): DatabaseSchema {
     findings: INITIAL_FINDINGS ? JSON.parse(JSON.stringify(INITIAL_FINDINGS)) : [],
     audit_events: initialAuditWithChain,
     case_history: INITIAL_CASE_HISTORY ? JSON.parse(JSON.stringify(INITIAL_CASE_HISTORY)) : [],
+    org_configs: {},
     initialized_at: new Date().toISOString(),
   };
 }
@@ -518,5 +521,18 @@ export class JsonRepository implements IRepository {
   async resetData(): Promise<void> {
     const fresh = getDefaultDatabase();
     await writeDatabase(fresh);
+  }
+
+  async getOrgConfig(orgId: string = 'default'): Promise<OrganizationConfig | null> {
+    const db = await readDatabase();
+    return db.org_configs?.[orgId] ?? null;
+  }
+
+  async saveOrgConfig(config: OrganizationConfig): Promise<OrganizationConfig> {
+    const db = await readDatabase();
+    if (!db.org_configs) db.org_configs = {};
+    db.org_configs[config.org_id] = config;
+    await writeDatabase(db);
+    return config;
   }
 }

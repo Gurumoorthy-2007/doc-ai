@@ -11,13 +11,28 @@ import type {
   FindingSeverity,
   ReconciliationStatus,
   BoundingBox,
+  OrganizationConfig,
+  ExistingInvoiceSummary,
 } from '@/lib/types';
+import {
+  validateGstin,
+  validateGstRateSlab,
+  validateGstTaxType,
+  hasHsnSacCode,
+} from './indiaGst';
 
 export interface DocumentData {
   id: string;
   category: string;
   fields: Record<string, ExtractedField>;
   lineItems: LineItem[];
+}
+
+export interface ReconciliationOptions {
+  goodsReceipt?: DocumentData | null;
+  existingInvoices?: ExistingInvoiceSummary[];
+  config?: OrganizationConfig;
+  requireFourWayMatching?: boolean;
 }
 
 export interface ReconciliationResult {
@@ -32,6 +47,10 @@ export interface ReconciliationResult {
   vendorName: string | null;
   contractStatus?: 'MATCH' | 'MISMATCH' | 'NOT_COMPARABLE' | 'WITHIN_CONTRACT_LIMIT' | 'EXCEEDS_CONTRACT';
   poToInvoiceStatus?: 'MATCH' | 'MISMATCH' | 'NOT_COMPARABLE';
+  cumulativeBilled?: number | null;
+  remainingPoBalance?: number | null;
+  remainingContractBalance?: number | null;
+  goodsReceiptMatched?: boolean;
 }
 
 export type ComparisonOutcome = 'MATCH' | 'MISMATCH' | 'NOT_COMPARABLE';
@@ -133,18 +152,38 @@ export function compareStrings(
 }
 
 /**
+ * Deterministically parses payment terms into normalized day offsets.
+ * E.g. "Immediate" -> 0, "Due Upon Receipt" -> 0, "Net 15" -> 15, "Net 30 Days" -> 30, "Net 60" -> 60.
+ */
+export function parsePaymentTermsDays(terms: string | null | undefined): number | null {
+  if (!terms) return null;
+  const clean = terms.trim().toLowerCase();
+  if (/\b(?:immediate|upon\s+receipt|due\s+(?:on|upon)\s+receipt|cod|cash\s+on\s+delivery)\b/i.test(clean)) {
+    return 0;
+  }
+  const match = clean.match(/\b(?:net\s*)?(\d+)(?:\s*days?)?\b/i);
+  if (match) {
+    const days = parseInt(match[1], 10);
+    return isNaN(days) ? null : days;
+  }
+  return null;
+}
+
+/**
  * Safe numeric comparison with configurable tolerance for rounding (default 0.01%).
  */
 export function compareNumeric(
   a: number | null | undefined,
   b: number | null | undefined,
-  tolerancePercent: number = 0.0001 // 0.01%
+  tolerancePercent: number = 0.0001, // 0.01%
+  absoluteTolerance?: number
 ): ComparisonOutcome {
   if (a === null || a === undefined || b === null || b === undefined) return 'NOT_COMPARABLE';
   if (a === 0 && b === 0) return 'MATCH';
   const diff = Math.abs(a - b);
-  // Also accept sub-cent / rounding differences within 0.05
-  if (diff <= 0.05) return 'MATCH';
+  const absTol = absoluteTolerance !== undefined ? absoluteTolerance : 0.05;
+  // Accept sub-cent or configured absolute difference
+  if (diff <= absTol) return 'MATCH';
   const base = Math.max(Math.abs(a), Math.abs(b));
   if (diff <= base * tolerancePercent) return 'MATCH';
   return 'MISMATCH';
@@ -325,10 +364,35 @@ export function reconcileDocuments(
   contract: DocumentData | null,
   purchaseOrder: DocumentData | null,
   invoice: DocumentData | null,
-  reconGroupId?: string
+  reconGroupId?: string,
+  goodsReceiptOrOptions?: DocumentData | null | ReconciliationOptions,
+  maybeOptions?: ReconciliationOptions
 ): ReconciliationResult {
   const findings: Omit<Finding, 'id' | 'user_id' | 'created_at' | 'updated_at'>[] = [];
   let overallStatus: ReconciliationStatus = 'matched';
+
+  // Normalize parameters
+  let goodsReceipt: DocumentData | null = null;
+  let options: ReconciliationOptions | undefined = maybeOptions;
+
+  if (goodsReceiptOrOptions) {
+    if ('fields' in goodsReceiptOrOptions && 'category' in goodsReceiptOrOptions) {
+      goodsReceipt = goodsReceiptOrOptions as DocumentData;
+    } else {
+      options = goodsReceiptOrOptions as ReconciliationOptions;
+      if (options.goodsReceipt) {
+        goodsReceipt = options.goodsReceipt;
+      }
+    }
+  }
+
+  const config = options?.config;
+  const existingInvoices = options?.existingInvoices || [];
+  const requireFourWayMatching = options?.requireFourWayMatching ?? config?.require_four_way_matching ?? false;
+
+  const priceTolerancePct = (config?.price_tolerance_percentage ?? 0.05) / 100;
+  const amountToleranceAbs = config?.amount_tolerance_absolute ?? 1.00;
+  const qtyTolerancePct = (config?.quantity_tolerance_percentage ?? 0.0) / 100;
 
   // Extract key values
   const contractValue = contract ? getNumericValue(contract.fields, 'contract_value') : null;
@@ -496,7 +560,7 @@ export function reconcileDocuments(
       variancePercentage = (variance / poTotal) * 100;
     }
 
-    const cmp = compareNumeric(invoiceTotal, poTotal);
+    const cmp = compareNumeric(invoiceTotal, poTotal, 0.0001, amountToleranceAbs);
     if (cmp === 'MISMATCH') {
       overallStatus = 'discrepancy';
       if (invoiceTotal > poTotal) {
@@ -622,6 +686,94 @@ export function reconcileDocuments(
     }
   }
 
+  // 5b. Cumulative Partial Invoicing vs PO and Contract Caps
+  let cumulativeBilled: number | null = null;
+  let remainingPoBalance: number | null = null;
+  let remainingContractBalance: number | null = null;
+
+  if (existingInvoices.length > 0 || invoiceTotal !== null) {
+    const priorInvoicesForPo = existingInvoices.filter((inv) => {
+      if (purchaseOrder && inv.po_reference) {
+        const poNum = getFieldValue(purchaseOrder.fields, 'po_number');
+        if (poNum && normalizeString(inv.po_reference) !== normalizeString(poNum)) {
+          return false;
+        }
+      }
+      if (invoice) {
+        if (inv.id && inv.id === invoice.id) return false;
+        const currentInvNum = getFieldValue(invoice.fields, 'invoice_number');
+        if (currentInvNum && inv.invoice_number && normalizeString(inv.invoice_number) === normalizeString(currentInvNum)) {
+          return false;
+        }
+      }
+      return true;
+    });
+
+    const priorBilled = priorInvoicesForPo.reduce((sum, inv) => sum + (inv.total || 0), 0);
+    const currentInvAmt = invoiceTotal || 0;
+    cumulativeBilled = priorBilled + currentInvAmt;
+    if (poTotal !== null) {
+      remainingPoBalance = poTotal - cumulativeBilled;
+    }
+    if (contractValue !== null) {
+      remainingContractBalance = contractValue - cumulativeBilled;
+    }
+
+    // Cumulative PO Cap Check
+    if (poTotal !== null && priorInvoicesForPo.length > 0 && cumulativeBilled > poTotal + amountToleranceAbs) {
+      overallStatus = 'discrepancy';
+      const poExcess = cumulativeBilled - poTotal;
+      findings.push(
+        makeFinding({
+          rule_id: 'RULE_PO_CUMULATIVE_BILLED_EXCEEDED',
+          finding_type: 'exceeds_po_amount',
+          severity: 'critical',
+          title: 'Cumulative partial invoices exceed PO authorization',
+          description: `Cumulative billed amount (${currency} ${cumulativeBilled.toLocaleString('en-IN')}) across ${priorInvoicesForPo.length + 1} invoices exceeds authorized PO commitment (${currency} ${poTotal.toLocaleString('en-IN')}) by ${currency} ${poExcess.toLocaleString('en-IN')}. Prior invoices billed: ${currency} ${priorBilled.toLocaleString('en-IN')}.`,
+          reason: 'Cumulative billing validation failed: sum of current and prior invoices exceeds authorized purchase order total.',
+          source_document_id: invoice?.id ?? null,
+          compared_document_id: purchaseOrder?.id ?? null,
+          source_value: cumulativeBilled.toString(),
+          compared_value: poTotal.toString(),
+          financial_impact: poExcess,
+          variance: poExcess,
+          currency,
+          calculation_method: 'Cumulative Invoices Sum - Approved PO Total',
+          source_field: 'total',
+          compared_field: 'total',
+          reconciliation_group_id: reconGroupId,
+        })
+      );
+    }
+
+    // Cumulative Contract Cap Check
+    if (contractValue !== null && priorInvoicesForPo.length > 0 && cumulativeBilled > contractValue + amountToleranceAbs) {
+      overallStatus = 'discrepancy';
+      const contractExcess = cumulativeBilled - contractValue;
+      findings.push(
+        makeFinding({
+          rule_id: 'RULE_CONTRACT_CUMULATIVE_BILLED_EXCEEDED',
+          finding_type: 'exceeds_contract_value',
+          severity: 'critical',
+          title: 'Cumulative billing exceeds contract value ceiling',
+          description: `Cumulative billed amount (${currency} ${cumulativeBilled.toLocaleString('en-IN')}) exceeds master contract ceiling (${currency} ${contractValue.toLocaleString('en-IN')}) by ${currency} ${contractExcess.toLocaleString('en-IN')}. Prior invoices billed: ${currency} ${priorBilled.toLocaleString('en-IN')}.`,
+          reason: 'Master contract commitment exceeded across cumulative billing cycle.',
+          source_document_id: invoice?.id ?? null,
+          compared_document_id: contract?.id ?? null,
+          source_value: cumulativeBilled.toString(),
+          compared_value: contractValue.toString(),
+          financial_impact: contractExcess,
+          variance: contractExcess,
+          currency,
+          calculation_method: 'Cumulative Invoices Sum - Master Contract Value Cap',
+          source_field: 'total',
+          compared_field: 'contract_value',
+          reconciliation_group_id: reconGroupId,
+        })
+      );
+    }
+  }
+
   // 6. Subtotal + Tax = Total Arithmetic Check (Invoice)
   if (invoice) {
     const subtotal = getNumericValue(invoice.fields, 'subtotal');
@@ -693,7 +845,7 @@ export function reconcileDocuments(
       if (poItem && invItem) {
         // Quantity check
         if (poItem.quantity !== null && invItem.quantity !== null) {
-          const qCmp = compareNumeric(poItem.quantity, invItem.quantity, 0);
+          const qCmp = compareNumeric(poItem.quantity, invItem.quantity, qtyTolerancePct);
           if (qCmp === 'MISMATCH') {
             const qtyVariance = invItem.quantity - poItem.quantity;
             const finImpact = invItem.unit_price ? Math.abs(qtyVariance) * invItem.unit_price : null;
@@ -724,7 +876,7 @@ export function reconcileDocuments(
 
         // Unit price check
         if (poItem.unit_price !== null && invItem.unit_price !== null) {
-          const pCmp = compareNumeric(poItem.unit_price, invItem.unit_price);
+          const pCmp = compareNumeric(poItem.unit_price, invItem.unit_price, priceTolerancePct);
           if (pCmp === 'MISMATCH') {
             const rateVariance = invItem.unit_price - poItem.unit_price;
             const priceVariance = invItem.quantity
@@ -753,6 +905,148 @@ export function reconcileDocuments(
               })
             );
             overallStatus = 'discrepancy';
+          }
+        }
+      }
+    }
+  }
+
+  // 7b. Four-Way Matching with Goods Receipt Note (GRN)
+  let goodsReceiptMatched = false;
+  if (requireFourWayMatching && invoice && !goodsReceipt) {
+    overallStatus = 'discrepancy';
+    findings.push(
+      makeFinding({
+        rule_id: 'RULE_GRN_MISSING',
+        finding_type: 'missing_field',
+        severity: 'high',
+        title: 'Missing Goods Receipt Note (4-Way Matching Required)',
+        description: 'Organization policy mandates four-way matching for physical goods invoices, but no verified Goods Receipt Note (GRN) was provided.',
+        reason: 'Four-way reconciliation requirement failed: invoice lacks receiving verification.',
+        source_document_id: invoice.id,
+        compared_document_id: null,
+        source_value: invoiceTotal?.toString() ?? null,
+        compared_value: null,
+        financial_impact: invoiceTotal ?? 0,
+        variance: invoiceTotal ?? 0,
+        currency,
+        calculation_method: 'Mandatory 4-way matching policy verification',
+        source_field: 'total',
+        reconciliation_group_id: reconGroupId,
+      })
+    );
+  }
+
+  if (goodsReceipt && invoice) {
+    goodsReceiptMatched = true;
+    const grnSupplier = getFieldValue(goodsReceipt.fields, 'supplier_name');
+    if (grnSupplier && invoiceSupplier) {
+      const outcome = compareSupplierNames(grnSupplier, invoiceSupplier);
+      if (outcome === 'MISMATCH') {
+        overallStatus = 'discrepancy';
+        findings.push(
+          makeFinding({
+            rule_id: 'RULE_SUPPLIER_MISMATCH',
+            finding_type: 'supplier_mismatch',
+            severity: 'high',
+            title: 'Supplier name mismatch (GRN vs Invoice)',
+            description: `Goods receipt supplier "${grnSupplier}" does not match invoice supplier "${invoiceSupplier}".`,
+            reason: 'Vendor identification check failed: entity on goods receipt note differs from invoice vendor.',
+            source_document_id: invoice.id,
+            compared_document_id: goodsReceipt.id,
+            source_value: invoiceSupplier,
+            compared_value: grnSupplier,
+            source_field: 'supplier_name',
+            compared_field: 'supplier_name',
+            reconciliation_group_id: reconGroupId,
+          })
+        );
+      }
+    }
+
+    // Compare GRN line items against Invoice line items
+    if (invoice.lineItems.length > 0 && goodsReceipt.lineItems.length > 0) {
+      for (const invItem of invoice.lineItems) {
+        if (!invItem.description || invItem.quantity === null) continue;
+        
+        // Find matching GRN item by description
+        const grnItem = goodsReceipt.lineItems.find((gi) => {
+          if (!gi.description) return false;
+          const normInv = normalizeString(invItem.description);
+          const normGrn = normalizeString(gi.description);
+          if (normInv === normGrn) return true;
+          const tokensA = new Set(normInv.split(/[^a-z0-9]/).filter(Boolean));
+          const tokensB = new Set(normGrn.split(/[^a-z0-9]/).filter(Boolean));
+          if (tokensA.size === 0 || tokensB.size === 0) return false;
+          const inter = [...tokensA].filter((t) => tokensB.has(t)).length;
+          return inter / Math.max(tokensA.size, tokensB.size) >= 0.5;
+        });
+
+        if (grnItem && grnItem.quantity !== null) {
+          const acceptedQty = (grnItem as { accepted_quantity?: number | null }).accepted_quantity !== undefined && (grnItem as { accepted_quantity?: number | null }).accepted_quantity !== null
+            ? Number((grnItem as { accepted_quantity?: number | null }).accepted_quantity)
+            : grnItem.quantity;
+          const rejectedQty = (grnItem as { rejected_quantity?: number | null }).rejected_quantity !== undefined && (grnItem as { rejected_quantity?: number | null }).rejected_quantity !== null
+            ? Number((grnItem as { rejected_quantity?: number | null }).rejected_quantity)
+            : 0;
+
+          // RULE_GRN_QUANTITY_MISMATCH: Invoiced quantity exceeds accepted quantity on GRN
+          if (invItem.quantity > acceptedQty + (acceptedQty * qtyTolerancePct)) {
+            overallStatus = 'discrepancy';
+            const qtyDiff = invItem.quantity - acceptedQty;
+            const unitPrice = invItem.unit_price ?? grnItem.unit_price ?? 0;
+            const financialDiff = qtyDiff * unitPrice;
+            findings.push(
+              makeFinding({
+                rule_id: 'RULE_GRN_QUANTITY_MISMATCH',
+                finding_type: 'quantity_discrepancy',
+                severity: 'critical',
+                title: `Invoiced quantity exceeds verified goods receipt (${invItem.description})`,
+                description: `Invoice bills for ${invItem.quantity} units of "${invItem.description}", but receiving warehouse accepted only ${acceptedQty} units on GRN (${qtyDiff} unit variance).`,
+                reason: 'Goods receipt 4-way matching failure: billed quantity exceeds physically verified and accepted quantity.',
+                source_document_id: invoice.id,
+                compared_document_id: goodsReceipt.id,
+                source_value: invItem.quantity.toString(),
+                compared_value: acceptedQty.toString(),
+                variance: qtyDiff,
+                financial_impact: financialDiff,
+                currency,
+                calculation_method: 'Quantity Variance = Invoice Billed Qty - GRN Accepted Qty',
+                source_field: 'quantity',
+                compared_field: 'quantity',
+                source_page: invItem.source_page ?? 1,
+                reconciliation_group_id: reconGroupId,
+              })
+            );
+          }
+
+          // RULE_GRN_DAMAGE_REJECTED: Invoice bills for damaged/rejected items
+          if (rejectedQty > 0 && invItem.quantity > acceptedQty) {
+            overallStatus = 'discrepancy';
+            const unitPrice = invItem.unit_price ?? grnItem.unit_price ?? 0;
+            const impact = rejectedQty * unitPrice;
+            findings.push(
+              makeFinding({
+                rule_id: 'RULE_GRN_DAMAGE_REJECTED',
+                finding_type: 'data_validation',
+                severity: 'critical',
+                title: `Invoice billed for damaged/rejected goods on GRN (${invItem.description})`,
+                description: `Warehouse marked ${rejectedQty} units as damaged or rejected on GRN for "${invItem.description}", but invoice billed for ${invItem.quantity} units without credit adjustment.`,
+                reason: 'Damage/rejection rule: billed amounts include damaged or unaccepted materials reported on GRN.',
+                source_document_id: invoice.id,
+                compared_document_id: goodsReceipt.id,
+                source_value: invItem.quantity.toString(),
+                compared_value: `Rejected: ${rejectedQty}`,
+                financial_impact: impact,
+                variance: rejectedQty,
+                currency,
+                calculation_method: 'Rejected Units * Unit Price',
+                source_field: 'quantity',
+                compared_field: 'rejected_quantity',
+                source_page: invItem.source_page ?? 1,
+                reconciliation_group_id: reconGroupId,
+              })
+            );
           }
         }
       }
@@ -996,7 +1290,76 @@ export function reconcileDocuments(
   const invoicePaymentTerms = invoice ? getFieldValue(invoice.fields, 'payment_terms') : null;
 
   if (contractPaymentTerms && invoicePaymentTerms) {
-    if (normalizeString(contractPaymentTerms) !== normalizeString(invoicePaymentTerms)) {
+    const contractDays = parsePaymentTermsDays(contractPaymentTerms);
+    const invoiceDays = parsePaymentTermsDays(invoicePaymentTerms);
+
+    if (contractDays !== null && invoiceDays !== null) {
+      if (invoiceDays < contractDays) {
+        overallStatus = 'discrepancy';
+        const daysDiff = contractDays - invoiceDays;
+        const annualRate = config?.annual_cost_of_capital_rate ?? 0.12;
+        const costOfCapital = (invoiceTotal || 0) * (daysDiff / 365) * annualRate;
+
+        findings.push(
+          makeFinding({
+            rule_id: 'RULE_PAYMENT_TERMS_MISMATCH',
+            finding_type: 'missing_field',
+            severity: 'high',
+            title: 'Payment terms conflict (Contract vs Invoice)',
+            description: `Contract stipulates payment terms "${contractPaymentTerms}", but invoice specifies "${invoicePaymentTerms}".`,
+            reason: 'Terms divergence: Invoiced credit/payment terms deviate from negotiated contract obligations.',
+            source_document_id: invoice!.id,
+            compared_document_id: contract!.id,
+            source_value: invoicePaymentTerms,
+            compared_value: contractPaymentTerms,
+            source_field: 'payment_terms',
+            compared_field: 'payment_terms',
+            reconciliation_group_id: reconGroupId,
+          })
+        );
+
+        findings.push(
+          makeFinding({
+            rule_id: 'RULE_CONFLICTING_PAYMENT_TERMS',
+            finding_type: 'payment_term_mismatch',
+            severity: 'high',
+            title: 'Conflicting payment terms: Invoice demands earlier payment than contract',
+            description: `Invoice specifies payment terms "${invoicePaymentTerms}" (${invoiceDays} days), but master contract specifies "${contractPaymentTerms}" (${contractDays} days). Demanding payment ${daysDiff} days early accelerates cash outflow, costing an estimated ${currency} ${costOfCapital.toFixed(2)} in capital financing at ${(annualRate * 100).toFixed(1)}% p.a.`,
+            reason: 'Payment clause conflict: Invoice settlement timeline is significantly more restrictive than agreed MSA/Contract.',
+            source_document_id: invoice!.id,
+            compared_document_id: contract!.id,
+            source_value: invoicePaymentTerms,
+            compared_value: contractPaymentTerms,
+            financial_impact: Math.round(costOfCapital * 100) / 100,
+            variance: daysDiff,
+            currency,
+            calculation_method: 'Capital Cost = Invoice Total * (Days Accelerated / 365) * Cost of Capital Rate',
+            source_field: 'payment_terms',
+            compared_field: 'payment_terms',
+            reconciliation_group_id: reconGroupId,
+          })
+        );
+      } else if (invoiceDays > contractDays) {
+        overallStatus = 'discrepancy';
+        findings.push(
+          makeFinding({
+            rule_id: 'RULE_PAYMENT_TERMS_MISMATCH',
+            finding_type: 'missing_field',
+            severity: 'medium',
+            title: 'Payment terms conflict (Contract vs Invoice)',
+            description: `Contract stipulates payment terms "${contractPaymentTerms}", but invoice specifies "${invoicePaymentTerms}".`,
+            reason: 'Terms divergence: Invoiced credit/payment terms deviate from negotiated contract obligations.',
+            source_document_id: invoice!.id,
+            compared_document_id: contract!.id,
+            source_value: invoicePaymentTerms,
+            compared_value: contractPaymentTerms,
+            source_field: 'payment_terms',
+            compared_field: 'payment_terms',
+            reconciliation_group_id: reconGroupId,
+          })
+        );
+      }
+    } else if (normalizeString(contractPaymentTerms) !== normalizeString(invoicePaymentTerms)) {
       overallStatus = 'discrepancy';
       findings.push(
         makeFinding({
@@ -1126,9 +1489,167 @@ export function reconcileDocuments(
     }
   }
 
+  // 15. Indian Fiscal Checks (GSTIN, Tax Types, Rates & HSN)
+  if (invoice) {
+    const supplierGstin = getFieldValue(invoice.fields, 'supplier_gstin') || getFieldValue(invoice.fields, 'gstin');
+    const customerGstin = getFieldValue(invoice.fields, 'customer_gstin') || getFieldValue(invoice.fields, 'buyer_gstin');
+
+    // Supplier GSTIN validation
+    if (supplierGstin) {
+      const suppResult = validateGstin(supplierGstin);
+      if (!suppResult.isValid) {
+        overallStatus = 'discrepancy';
+        const isChecksum = suppResult.errorType === 'CHECKSUM_FAILURE';
+        findings.push(
+          makeFinding({
+            rule_id: isChecksum ? 'RULE_GSTIN_CHECKSUM_FAILURE' : 'RULE_GSTIN_INVALID_FORMAT',
+            finding_type: 'data_validation',
+            severity: 'high',
+            title: isChecksum ? 'Supplier GSTIN failed checksum verification' : 'Invalid Supplier GSTIN format',
+            description: suppResult.error || `Supplier GSTIN "${supplierGstin}" is invalid.`,
+            reason: 'Statutory compliance validation: Supplier GSTIN must be a valid 15-character alphanumeric identifier with valid Luhn-mod-36 checksum.',
+            source_document_id: invoice.id,
+            compared_document_id: null,
+            source_value: supplierGstin,
+            compared_value: null,
+            calculation_method: 'Luhn-mod-36 statutory checksum verification',
+            source_field: 'supplier_gstin',
+            source_page: invoice.fields['supplier_gstin']?.source_page ?? 1,
+            reconciliation_group_id: reconGroupId,
+          })
+        );
+      }
+    }
+
+    // Customer GSTIN validation
+    if (customerGstin) {
+      const custResult = validateGstin(customerGstin);
+      if (!custResult.isValid) {
+        overallStatus = 'discrepancy';
+        const isChecksum = custResult.errorType === 'CHECKSUM_FAILURE';
+        findings.push(
+          makeFinding({
+            rule_id: isChecksum ? 'RULE_GSTIN_CHECKSUM_FAILURE' : 'RULE_GSTIN_INVALID_FORMAT',
+            finding_type: 'data_validation',
+            severity: 'high',
+            title: isChecksum ? 'Buyer GSTIN failed checksum verification' : 'Invalid Buyer GSTIN format',
+            description: custResult.error || `Buyer GSTIN "${customerGstin}" is invalid.`,
+            reason: 'Statutory compliance validation: Buyer GSTIN must be a valid 15-character alphanumeric identifier with valid Luhn-mod-36 checksum.',
+            source_document_id: invoice.id,
+            compared_document_id: null,
+            source_value: customerGstin,
+            compared_value: null,
+            calculation_method: 'Luhn-mod-36 statutory checksum verification',
+            source_field: 'customer_gstin',
+            source_page: invoice.fields['customer_gstin']?.source_page ?? 1,
+            reconciliation_group_id: reconGroupId,
+          })
+        );
+      }
+    }
+
+    // Tax Type Consistency (Intra-state CGST+SGST vs Inter-state IGST)
+    const cgst = getNumericValue(invoice.fields, 'cgst');
+    const sgst = getNumericValue(invoice.fields, 'sgst');
+    const igst = getNumericValue(invoice.fields, 'igst');
+
+    if (supplierGstin && customerGstin) {
+      const taxTypeResult = validateGstTaxType(supplierGstin, customerGstin, cgst, sgst, igst);
+      if (!taxTypeResult.isConsistent) {
+        overallStatus = 'discrepancy';
+        findings.push(
+          makeFinding({
+            rule_id: 'RULE_GST_TYPE_INCONSISTENT',
+            finding_type: 'tax_discrepancy',
+            severity: 'high',
+            title: 'GST tax structure inconsistent with place of supply',
+            description: taxTypeResult.error || 'GST tax components do not match place of supply rules.',
+            reason: 'Statutory tax rule: Intra-state transactions must charge equal CGST + SGST; inter-state transactions must charge IGST.',
+            source_document_id: invoice.id,
+            compared_document_id: null,
+            source_value: `CGST: ${cgst ?? 0}, SGST: ${sgst ?? 0}, IGST: ${igst ?? 0}`,
+            compared_value: `Supply Type: ${taxTypeResult.supplyType}`,
+            calculation_method: 'Place of supply determination via 2-digit GSTIN state codes',
+            source_field: 'tax',
+            financial_impact: Math.max(cgst ?? 0, sgst ?? 0, igst ?? 0),
+            reconciliation_group_id: reconGroupId,
+          })
+        );
+      }
+    }
+
+    // Tax Rate Sanity (Check against official slabs 0, 5, 12, 18, 28, 0.25, 3)
+    const subtotal = getNumericValue(invoice.fields, 'subtotal');
+    const tax = getNumericValue(invoice.fields, 'tax');
+    if (subtotal !== null && tax !== null && subtotal > 0 && tax > 0) {
+      const effectiveRate = (tax / subtotal) * 100;
+      const slabCheck = validateGstRateSlab(effectiveRate);
+      if (!slabCheck.isValid) {
+        overallStatus = 'discrepancy';
+        findings.push(
+          makeFinding({
+            rule_id: 'RULE_GST_RATE_UNUSUAL',
+            finding_type: 'tax_discrepancy',
+            severity: 'medium',
+            title: `Unusual GST rate detected (${effectiveRate.toFixed(2)}%)`,
+            description: `Effective tax rate of ${effectiveRate.toFixed(2)}% on subtotal ${currency} ${subtotal.toLocaleString('en-IN')} (tax: ${currency} ${tax.toLocaleString('en-IN')}) does not match any statutory GST rate slab (0%, 5%, 12%, 18%, 28%, 0.25%, 3%).`,
+            reason: 'GST rate sanity check failed: Effective rate deviates from standard statutory slabs.',
+            source_document_id: invoice.id,
+            compared_document_id: null,
+            source_value: `${effectiveRate.toFixed(2)}%`,
+            compared_value: 'Official Slabs: 0%, 5%, 12%, 18%, 28%',
+            variance: effectiveRate,
+            calculation_method: 'Effective Tax Rate = (Tax / Subtotal) * 100',
+            source_field: 'tax',
+            reconciliation_group_id: reconGroupId,
+          })
+        );
+      }
+    }
+
+    // Mandatory HSN / SAC Code Presence
+    const requireHsn = config?.require_hsn_codes ?? false;
+    if (requireHsn && invoice.lineItems.length > 0) {
+      for (const item of invoice.lineItems) {
+        const itemText = `${item.description || ''} ${(item as { hsn?: string }).hsn || ''}`;
+        if (!hasHsnSacCode(itemText)) {
+          overallStatus = 'discrepancy';
+          findings.push(
+            makeFinding({
+              rule_id: 'RULE_HSN_CODE_MISSING',
+              finding_type: 'missing_field',
+              severity: 'medium',
+              title: `Missing HSN/SAC code on line item (${item.description || 'Item'})`,
+              description: `Line item "${item.description || 'Unnamed item'}" does not include a valid 4-, 6-, or 8-digit HSN/SAC code as mandated by organization tax compliance policy.`,
+              reason: 'Mandatory HSN/SAC policy check failed.',
+              source_document_id: invoice.id,
+              compared_document_id: null,
+              source_value: null,
+              compared_value: 'Mandatory HSN/SAC',
+              source_field: 'description',
+              source_page: item.source_page ?? 1,
+              reconciliation_group_id: reconGroupId,
+            })
+          );
+        }
+      }
+    }
+  }
+
+  // Filter findings based on organization enabled_rules configuration if specified
+  const enabledRules = config?.enabled_rules;
+  let finalFindings = findings;
+  if (enabledRules && enabledRules.length > 0) {
+    const enabledSet = new Set(enabledRules);
+    finalFindings = findings.filter((f) => !f.rule_id || enabledSet.has(f.rule_id));
+    if (finalFindings.length === 0 && overallStatus === 'discrepancy') {
+      overallStatus = 'matched';
+    }
+  }
+
   return {
     status: overallStatus,
-    findings,
+    findings: finalFindings,
     contractValue,
     poValue: poTotal,
     invoiceValue: invoiceTotal,
@@ -1144,7 +1665,11 @@ export function reconcileDocuments(
         : 'NOT_COMPARABLE',
     poToInvoiceStatus:
       invoiceTotal !== null && poTotal !== null
-        ? compareNumeric(invoiceTotal, poTotal)
+        ? compareNumeric(invoiceTotal, poTotal, 0.0001, amountToleranceAbs)
         : 'NOT_COMPARABLE',
+    cumulativeBilled,
+    remainingPoBalance,
+    remainingContractBalance,
+    goodsReceiptMatched,
   };
 }

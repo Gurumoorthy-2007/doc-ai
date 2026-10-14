@@ -6,6 +6,7 @@ export type DocumentCategory =
   | 'contract' 
   | 'purchase_order' 
   | 'invoice' 
+  | 'goods_receipt'
   | 'receipt' 
   | 'statement' 
   | 'compliance' 
@@ -296,10 +297,51 @@ export interface InvoiceExtraction {
   }>;
 }
 
+export interface GoodsReceiptExtraction {
+  grn_number: string | null;
+  supplier_name: string | null;
+  po_reference: string | null;
+  delivery_date: string | null;
+  received_by?: string | null;
+  warehouse_location?: string | null;
+  line_items: Array<{
+    description: string;
+    quantity: number | null;
+    unit_price?: number | null;
+    amount?: number | null;
+    unit: string | null;
+    accepted_quantity?: number | null;
+    rejected_quantity?: number | null;
+    damage_notes?: string | null;
+  }>;
+}
+
 export type ExtractionResult = 
   | { type: 'contract'; data: ContractExtraction }
   | { type: 'purchase_order'; data: PurchaseOrderExtraction }
-  | { type: 'invoice'; data: InvoiceExtraction };
+  | { type: 'invoice'; data: InvoiceExtraction }
+  | { type: 'goods_receipt'; data: GoodsReceiptExtraction };
+
+export interface ExistingInvoiceSummary {
+  id: string;
+  invoice_number: string | null;
+  po_reference: string | null;
+  total: number;
+  invoice_date?: string | null;
+  status?: string;
+}
+
+export interface OrganizationConfig {
+  org_id: string;
+  org_name?: string;
+  price_tolerance_percentage?: number; // e.g. 0.05 for 0.05%
+  amount_tolerance_absolute?: number; // e.g. 1.00
+  quantity_tolerance_percentage?: number; // e.g. 0.0
+  require_four_way_matching?: boolean; // default false
+  require_hsn_codes?: boolean; // default false
+  annual_cost_of_capital_rate?: number; // e.g. 0.12 (12%)
+  enabled_rules?: string[]; // If empty or undefined, all rules are enabled
+}
 
 export interface EnhancedExtractionOutput {
   result: ExtractionResult;
